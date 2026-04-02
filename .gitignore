@@ -1,0 +1,28 @@
+# Workspace
+.DS_Store
+Thumbs.db
+node_modules/
+target/
+dist/
+build/
+.vscode/
+.idea/
+.env
+.env.*
+*.log
+
+# Rust / Cargo
+**/target/
+Cargo.lock
+
+# Node / pnpm
+**/node_modules/
+.pnpm-debug.log
+.next/
+
+# Docker
+**/.docker
+**/pgdata
+
+# OS
+*.swp

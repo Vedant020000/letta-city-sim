@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: letta_city_sim
+      POSTGRES_USER: sim
+      POSTGRES_PASSWORD: sim_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sim"]
+      interval: 5s
+      retries: 5
+
+  world-api:
+    build: ./world-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://sim:sim_dev_password@db:5432/letta_city_sim
+      SIM_API_KEY: dev_key_change_me
+      LETTA_API_KEY: your_letta_api_key
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./world-api:/app
+    command: ["cargo", "watch", "-x", "run"]
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - world-api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_WS_URL: ws://localhost:3001/ws/events
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    command: ["npm", "run", "dev"]
+
+volumes:
+  pgdata:
