@@ -13,7 +13,6 @@ build/
 
 # Rust / Cargo
 **/target/
-Cargo.lock
 
 # Node / pnpm
 **/node_modules/
