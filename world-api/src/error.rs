@@ -18,6 +18,9 @@ pub enum AppError {
     #[error("resource not found")]
     NotFound,
 
+    #[error("bad request: {0}")]
+    BadRequest(String),
+
     #[error("unexpected error: {0}")]
     Unexpected(String),
 }
@@ -34,6 +37,7 @@ impl IntoResponse for AppError {
             AppError::Config(_) => (StatusCode::INTERNAL_SERVER_ERROR, "configuration error"),
             AppError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io error"),
             AppError::NotFound => (StatusCode::NOT_FOUND, "not found"),
+            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad request"),
             AppError::Unexpected(_) => (StatusCode::INTERNAL_SERVER_ERROR, "unexpected error"),
         };
 

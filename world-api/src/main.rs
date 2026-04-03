@@ -21,6 +21,7 @@ use routes::agents::{
     update_agent_location,
 };
 use routes::locations::list_locations;
+use routes::pathfind::get_path;
 use state::AppState;
 
 #[tokio::main]
@@ -43,6 +44,7 @@ async fn main() -> AppResult<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/locations", get(list_locations))
+        .route("/pathfind", get(get_path))
         .route("/agents", get(list_agents))
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/location", patch(update_agent_location))
