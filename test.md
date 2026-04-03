@@ -156,3 +156,18 @@ Expect:
 - Unknown IDs => 404 where expected
 - Bad request payloads => 400 where expected
 - Missing `x-agent-id` on required routes => 400
+
+---
+
+## 8) Shared lcity CLI health check
+
+```powershell
+New-Item -ItemType Directory -Force .lcity | Out-Null
+Set-Content .lcity\agent_id "eddy_lin"
+node .\lcity\bin\lcity.mjs health_check
+```
+
+Expect:
+- JSON output with `ok: true` and `status_code: 200`
+- `data.agent_id` matches input
+- non-zero exit code + `ok: false` for invalid agent IDs

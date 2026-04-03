@@ -34,11 +34,12 @@ pub async fn agent_health_check(
         ));
     }
 
-    let row = sqlx::query_as::<_, (String, String, String)>(
+    let row = sqlx::query_as::<_, (String, String, String, String)>(
         r#"
-        SELECT letta_agent_id, current_location_id, state
+        SELECT id, letta_agent_id, current_location_id, state
         FROM agents
-        WHERE id = $1
+        WHERE id = $1 OR letta_agent_id = $1
+        LIMIT 1
         "#,
     )
     .bind(&agent_id)
@@ -48,10 +49,10 @@ pub async fn agent_health_check(
 
     Ok(Json(AgentHealthResponse {
         status: "ok".to_string(),
-        agent_id,
-        letta_agent_id: row.0,
-        current_location_id: row.1,
-        state: row.2,
+        agent_id: row.0,
+        letta_agent_id: row.1,
+        current_location_id: row.2,
+        state: row.3,
     }))
 }
 

@@ -1,0 +1,14 @@
+{
+  "name": "lcity-cli",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "lcity": "./bin/lcity.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ]
+}
