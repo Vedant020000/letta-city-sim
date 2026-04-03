@@ -14,6 +14,17 @@ This package is structured to be published independently.
 node .\lcity\bin\lcity.mjs health_check
 ```
 
+## Supported commands (current)
+
+- `health_check`
+- `move_to --location-id`
+- `move_to_agent --target-agent-id`
+- `list_locations`, `get_location --id`, `nearby_locations --id`
+- `pathfind --from --to`
+- `world_time`
+- `list_inventory`
+- `board_read`, `board_posts`, `board_post --text`, `board_delete --post-id`, `board_clear`
+
 ## Use `.lcity/agent_id`
 
 ```powershell
@@ -41,3 +52,5 @@ Output is always JSON:
 ```json
 {"ok":true,"status_code":200,"data":{"status":"ok","agent_id":"eddy_lin","letta_agent_id":"...","current_location_id":"lin_bedroom","state":"idle"}}
 ```
+
+All commands are designed for tool-calling and return machine-readable JSON.
