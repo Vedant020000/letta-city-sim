@@ -17,7 +17,7 @@ mod state;
 
 use error::AppResult;
 use routes::agents::{
-    clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
+    agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
     update_agent_activity, update_agent_location,
 };
 use routes::board::{
@@ -68,6 +68,7 @@ async fn main() -> AppResult<()> {
         .route("/objects/:id", patch(update_object_state))
         .route("/pathfind", get(get_path))
         .route("/agents", get(list_agents))
+        .route("/agents/health", get(agent_health_check))
         .route("/agents/move", patch(move_agent_with_header))
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/location", patch(update_agent_location))

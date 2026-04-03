@@ -4,7 +4,7 @@ use axum::{
     http::HeaderMap,
 };
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::error::AppResult;
@@ -16,9 +16,57 @@ pub struct UpdateAgentLocationRequest {
     pub location_id: String,
 }
 
+pub async fn agent_health_check(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Json<AgentHealthResponse>> {
+    let agent_id = headers
+        .get("x-agent-id")
+        .ok_or_else(|| AppError::BadRequest("missing x-agent-id header".to_string()))?
+        .to_str()
+        .map_err(|_| AppError::BadRequest("invalid x-agent-id header".to_string()))?
+        .trim()
+        .to_string();
+
+    if agent_id.is_empty() {
+        return Err(AppError::BadRequest(
+            "x-agent-id header cannot be empty".to_string(),
+        ));
+    }
+
+    let row = sqlx::query_as::<_, (String, String, String)>(
+        r#"
+        SELECT letta_agent_id, current_location_id, state
+        FROM agents
+        WHERE id = $1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    Ok(Json(AgentHealthResponse {
+        status: "ok".to_string(),
+        agent_id,
+        letta_agent_id: row.0,
+        current_location_id: row.1,
+        state: row.2,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateAgentActivityRequest {
     pub activity: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentHealthResponse {
+    pub status: String,
+    pub agent_id: String,
+    pub letta_agent_id: String,
+    pub current_location_id: String,
+    pub state: String,
 }
 
 pub async fn list_agents(State(state): State<AppState>) -> AppResult<Json<Vec<Agent>>> {
