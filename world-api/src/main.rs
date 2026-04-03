@@ -17,8 +17,8 @@ mod state;
 
 use error::AppResult;
 use routes::agents::{
-    clear_agent_activity, get_agent_by_id, list_agents, update_agent_activity,
-    update_agent_location,
+    clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
+    update_agent_activity, update_agent_location,
 };
 use routes::inventory::transfer_item_between_agents;
 use routes::inventory::{
@@ -54,6 +54,7 @@ async fn main() -> AppResult<()> {
         .route("/locations/:id/nearby", get(get_nearby_locations))
         .route("/pathfind", get(get_path))
         .route("/agents", get(list_agents))
+        .route("/agents/move", patch(move_agent_with_header))
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/location", patch(update_agent_location))
         .route("/agents/:id/activity", patch(update_agent_activity))

@@ -1,6 +1,7 @@
 use axum::{
     Json,
     extract::{Path, State},
+    http::HeaderMap,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -76,6 +77,41 @@ pub async fn update_agent_location(
     Path(agent_id): Path<String>,
     Json(payload): Json<UpdateAgentLocationRequest>,
 ) -> AppResult<Json<Agent>> {
+    let updated_agent =
+        perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
+
+    Ok(Json(updated_agent))
+}
+
+pub async fn move_agent_with_header(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<UpdateAgentLocationRequest>,
+) -> AppResult<Json<Agent>> {
+    let agent_id = headers
+        .get("x-agent-id")
+        .ok_or_else(|| AppError::BadRequest("missing x-agent-id header".to_string()))?
+        .to_str()
+        .map_err(|_| AppError::BadRequest("invalid x-agent-id header".to_string()))?
+        .to_string();
+
+    if agent_id.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "x-agent-id header cannot be empty".to_string(),
+        ));
+    }
+
+    let updated_agent =
+        perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
+
+    Ok(Json(updated_agent))
+}
+
+async fn perform_agent_location_update(
+    state: &AppState,
+    agent_id: &str,
+    location_id: &str,
+) -> AppResult<Agent> {
     let mut tx = state.pool().begin().await?;
 
     let exists = sqlx::query_scalar::<_, String>(
@@ -85,7 +121,7 @@ pub async fn update_agent_location(
         WHERE id = $1
         "#,
     )
-    .bind(&payload.location_id)
+    .bind(location_id)
     .fetch_optional(&mut *tx)
     .await?;
 
@@ -113,8 +149,8 @@ pub async fn update_agent_location(
             state_updated_at
         "#,
     )
-    .bind(&payload.location_id)
-    .bind(&agent_id)
+    .bind(location_id)
+    .bind(agent_id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -141,7 +177,7 @@ pub async fn update_agent_location(
 
     tx.commit().await?;
 
-    Ok(Json(updated_agent))
+    Ok(updated_agent)
 }
 
 pub async fn update_agent_activity(
