@@ -9,7 +9,22 @@ Autonomous city simulation where each NPC is a Letta agent acting on its own clo
 - **scripts/** &mdash; Tooling helpers (migrations, bootstrap, etc.).
 
 ## Status
-Foundation scaffolding only. Follow `docs/letta-city-sim-extensive-todo.md` to build the stack in order.
+Backend MVP foundation is now live.
+
+Implemented so far:
+- World API scaffold with Axum + sqlx + Postgres migration
+- Seed data + idempotent seeding script (`scripts/seed.ps1`)
+- Agents API (list/detail/move/activity)
+- Locations API (list/detail/nearby)
+- Pathfinding API (`GET /pathfind` using Dijkstra)
+- Inventory API (list/add/remove/adjacent-only transfer)
+- Notice board API (public text-only + internal audit events)
+- Objects API (`GET /objects/:location_id`, `PATCH /objects/:id`)
+- Events API (`GET /events`, `POST /events`)
+- World time API (`GET /world/time`)
+- Manual QA checklist in `test.md`
+
+Still pending: Letta SDK tool wiring, webhook bridge, conversations, websocket stream, and frontend map/UI.
 
 ## Local development
 Dependencies:
@@ -17,12 +32,32 @@ Dependencies:
 - Rust toolchain (stable)
 - Node.js 20 + pnpm (once frontend begins)
 
-```bash
-# One-command boot (will be wired in future steps)
-make dev
+```powershell
+# Start database
+docker compose up db -d
+
+# Seed world data
+powershell -ExecutionPolicy Bypass -File .\scripts\seed.ps1
+
+# Run API
+cd world-api
+$env:DATABASE_URL="postgres://sim:sim_dev_password@localhost:5432/letta_city_sim"
+cargo run
 ```
 
 > Keep `.env` synced with `.env.example`. Never commit real secrets.
+
+## Quick endpoint smoke tests
+
+```powershell
+curl.exe http://localhost:3001/health
+curl.exe http://localhost:3001/agents
+curl.exe "http://localhost:3001/pathfind?from=lin_bedroom&to=hobbs_cafe_seating"
+curl.exe http://localhost:3001/board
+curl.exe http://localhost:3001/world/time
+```
+
+For full manual validation, use `test.md`.
 
 ## Documentation
 - Canonical product brief: `docs/letta-city-sim-prd.md`

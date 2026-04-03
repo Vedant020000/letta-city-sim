@@ -4,27 +4,27 @@ This is the full build order from zero to a releasable first version.
 
 ## Foundation
 
-- [ ] Decide the monorepo structure: `world-api/`, `frontend/`, `seed/`, `docs/`, `scripts/`.
-- [ ] Create the GitHub repo `letta-city-sim` and add a root `README.md`, `.gitignore`, `LICENSE`, `.env.example`, and `Makefile`.
-- [ ] Add `docker-compose.yml` with Postgres, `world-api`, and `frontend` services so local development has one boot path.
-- [ ] Define the canonical environment variables: `DATABASE_URL`, `SIM_API_KEY`, `LETTA_API_KEY`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, and Clerk keys if auth stays in scope.
+- [x] Decide the monorepo structure: `world-api/`, `frontend/`, `seed/`, `docs/`, `scripts/`.
+- [x] Create the GitHub repo `letta-city-sim` and add a root `README.md`, `.gitignore`, `LICENSE`, `.env.example`, and `Makefile`.
+- [x] Add `docker-compose.yml` with Postgres, `world-api`, and `frontend` services so local development has one boot path.
+- [x] Define the canonical environment variables: `DATABASE_URL`, `SIM_API_KEY`, `LETTA_API_KEY`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, and Clerk keys if auth stays in scope.
 
 ## Database design
 
-- [ ] Write the initial PostgreSQL migration for `locations`, `location_adjacency`, `agents`, `world_objects`, `inventory_items`, `conversations`, `conversation_participants`, `conversation_messages`, `events`, and `simulation_state`.
-- [ ] Add indexes for event lookups, active conversations, agent-by-location queries, and inventory ownership queries so reads stay fast as the town gets busy.
+- [x] Write the initial PostgreSQL migration for `locations`, `location_adjacency`, `agents`, `world_objects`, `inventory_items`, `conversations`, `conversation_participants`, `conversation_messages`, `events`, and `simulation_state`.
+- [x] Add indexes for event lookups, active conversations, agent-by-location queries, and inventory ownership queries so reads stay fast as the town gets busy.
 - [ ] Use `jsonb` only where flexibility is genuinely needed, like `world_objects.state` and `events.metadata`, because PostgreSQL notes that JSON updates still lock the whole row and large JSON documents increase contention.[page:3]
 - [ ] Keep inventory and conversation membership relational, not embedded JSON, so transfers and joins stay atomic and easy to query.[page:2][page:3]
-- [ ] Seed the map: insert all locations, adjacency edges with `travel_secs`, starter objects, and the six starter agents.
-- [ ] Install and standardise on `sqlx-cli` so migrations are reproducible and checked into the repo.
+- [x] Seed the map: insert all locations, adjacency edges with `travel_secs`, starter objects, and the six starter agents.
+- [x] Install and standardise on `sqlx-cli` so migrations are reproducible and checked into the repo.
 
 ## Rust world-api scaffold
 
-- [ ] Create the Rust service with Axum, Tokio, `sqlx`, `serde`, `tower-http`, `tracing`, and `thiserror`.
-- [ ] Set up `main.rs` to load env vars, create the Postgres pool, initialise tracing, mount routes, and bind the HTTP server.
+- [x] Create the Rust service with Axum, Tokio, `sqlx`, `serde`, `tower-http`, `tracing`, and `thiserror`.
+- [x] Set up `main.rs` to load env vars, create the Postgres pool, initialise tracing, mount routes, and bind the HTTP server.
 - [ ] Create shared `AppState` with the `PgPool` and the WebSocket broadcast channel.
-- [ ] Add typed models for agents, locations, objects, conversations, messages, and events.
-- [ ] Add a standard JSON error type so every failure path returns structured error responses.
+- [x] Add typed models for agents, locations, objects, conversations, messages, and events.
+- [x] Add a standard JSON error type so every failure path returns structured error responses.
 
 ## Authentication and safety
 
@@ -36,18 +36,18 @@ This is the full build order from zero to a releasable first version.
 
 ## Core routes
 
-- [ ] Implement `GET /agents` and `GET /agents/:id` first so the frontend and debugging tools can inspect live state immediately.
-- [ ] Implement `PATCH /agents/:id/location`, `PATCH /agents/:id/activity`, and `DELETE /agents/:id/activity` next, and append matching events for every mutation.
-- [ ] Implement `GET /locations`, `GET /locations/:id`, and `GET /locations/:id/nearby` so agents can inspect the world around them.
-- [ ] Implement `GET /pathfind?from=&to=` using BFS over `location_adjacency` and return both the path and total travel time.
-- [ ] Implement inventory routes only after location and agent state are stable, because inventory correctness depends on reliable location state.
-- [ ] Implement object routes so agents can read and mutate shared world state like beds, stoves, notice boards, and cafe machines.
+- [x] Implement `GET /agents` and `GET /agents/:id` first so the frontend and debugging tools can inspect live state immediately.
+- [x] Implement `PATCH /agents/:id/location`, `PATCH /agents/:id/activity`, and `DELETE /agents/:id/activity` next, and append matching events for every mutation.
+- [x] Implement `GET /locations`, `GET /locations/:id`, and `GET /locations/:id/nearby` so agents can inspect the world around them.
+- [x] Implement `GET /pathfind?from=&to=` using BFS over `location_adjacency` and return both the path and total travel time.
+- [x] Implement inventory routes only after location and agent state are stable, because inventory correctness depends on reliable location state.
+- [x] Implement object routes so agents can read and mutate shared world state like beds, stoves, notice boards, and cafe machines.
 - [ ] Implement conversation routes as a first-class system, not a hack on top of events, because synchronous multi-agent discussions are central to the product.
 
 ## Event log and realtime
 
-- [ ] Make the `events` table append-only and treat it as the canonical history of what physically happened in the city.
-- [ ] Implement filtered `GET /events` queries for debugging, observability, and the frontend feed.
+- [x] Make the `events` table append-only and treat it as the canonical history of what physically happened in the city.
+- [x] Implement filtered `GET /events` queries for debugging, observability, and the frontend feed.
 - [ ] Add a WebSocket endpoint `/ws/events` and broadcast every mutation through a typed event envelope.
 - [ ] Send a short backlog on WebSocket connect so the frontend can catch up without a blank screen.
 - [ ] Keep the event payloads small and explicit because they will drive both the Phaser scene and the inspector panels.
@@ -65,7 +65,7 @@ This is the full build order from zero to a releasable first version.
 - [ ] Write the base system prompt template for all NPCs: persona, behaviour rules, tool usage expectations, shutdown behaviour, and how to interpret incoming interrupts.
 - [ ] Create one tool wrapper per World API action: `look_around`, `move_to`, `set_activity`, `finish_activity`, `check_inventory`, `pick_up`, `put_down`, `give_to`, `speak_to`, `reply`, `join_conversation`, `leave_conversation`, `interact_with`, `observe_events`, and `check_world_time`.
 - [ ] Standardise all tool responses so agents always receive predictable JSON shapes.
-- [ ] Store the Letta agent IDs and message endpoint metadata in PostgreSQL so the world and the agents are linked cleanly.
+- [x] Store the Letta agent IDs and message endpoint metadata in PostgreSQL so the world and the agents are linked cleanly.
 - [ ] Build a bootstrap script that creates or syncs all starter agents from seed data.
 
 ## Single-agent proving
@@ -123,6 +123,13 @@ This is the full build order from zero to a releasable first version.
 - [ ] Test concurrent inventory transfers and conversation joins under load.
 - [ ] Test long-running sessions where agents go idle and get reawakened many times over.
 - [ ] Add a reset script that drops, migrates, and reseeds the world for fast iteration.
+
+## Progress snapshot (2026-04-03)
+
+- [x] Backend MVP route surface in place (agents, locations, pathfinding, inventory, board, objects, events, world time).
+- [x] Header-based agent identity route for SDK integration (`GET /agents/health`, `PATCH /agents/move` with `x-agent-id`).
+- [x] Manual test checklist added in `test.md`.
+- [ ] Next milestone: wire one real Letta agent via SDK/tool wrapper and run first unattended single-agent session.
 
 ## Packaging and docs
 
