@@ -21,6 +21,9 @@ use routes::agents::{
     update_agent_location,
 };
 use routes::inventory::transfer_item_between_agents;
+use routes::inventory::{
+    add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory,
+};
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::pathfind::get_path;
 use state::AppState;
@@ -53,6 +56,12 @@ async fn main() -> AppResult<()> {
         .route("/agents/:id/location", patch(update_agent_location))
         .route("/agents/:id/activity", patch(update_agent_activity))
         .route("/agents/:id/activity", delete(clear_agent_activity))
+        .route("/inventory/:id", get(get_agent_inventory))
+        .route("/inventory/:id/add", patch(add_item_to_agent_inventory))
+        .route(
+            "/inventory/:id/remove",
+            patch(remove_item_from_agent_inventory),
+        )
         .route(
             "/agents/:id/inventory/transfer",
             patch(transfer_item_between_agents),

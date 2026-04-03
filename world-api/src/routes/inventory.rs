@@ -6,12 +6,189 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::error::{AppError, AppResult};
+use crate::models::inventory::InventoryItem;
 use crate::state::AppState;
+
+#[derive(Debug, Deserialize)]
+pub struct AddInventoryItemRequest {
+    pub item_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RemoveInventoryItemRequest {
+    pub item_id: String,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct TransferItemRequest {
     pub to_agent_id: String,
     pub item_id: String,
+}
+
+pub async fn get_agent_inventory(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> AppResult<Json<Vec<InventoryItem>>> {
+    let exists = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT id
+        FROM agents
+        WHERE id = $1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?;
+
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let items = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        SELECT id, name, held_by, location_id, state
+        FROM inventory_items
+        WHERE held_by = $1
+        ORDER BY name
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_all(state.pool())
+    .await?;
+
+    Ok(Json(items))
+}
+
+pub async fn add_item_to_agent_inventory(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+    Json(payload): Json<AddInventoryItemRequest>,
+) -> AppResult<Json<InventoryItem>> {
+    let mut tx = state.pool().begin().await?;
+
+    let agent_location = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT current_location_id
+        FROM agents
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let updated_item = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        UPDATE inventory_items
+        SET held_by = $1,
+            location_id = NULL
+        WHERE id = $2
+          AND location_id = $3
+        RETURNING id, name, held_by, location_id, state
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(&payload.item_id)
+    .bind(&agent_location)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| {
+        AppError::BadRequest("item is not available at agent's current location".to_string())
+    })?;
+
+    let description = format!("Agent {} picked up item {}", agent_id, updated_item.id);
+
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("item.picked_up")
+    .bind(&agent_id)
+    .bind(&agent_location)
+    .bind(description)
+    .bind(
+        serde_json::json!({
+            "item_id": updated_item.id,
+            "item_name": updated_item.name,
+        })
+        .to_string(),
+    )
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(updated_item))
+}
+
+pub async fn remove_item_from_agent_inventory(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+    Json(payload): Json<RemoveInventoryItemRequest>,
+) -> AppResult<Json<InventoryItem>> {
+    let mut tx = state.pool().begin().await?;
+
+    let agent_location = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT current_location_id
+        FROM agents
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let updated_item = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        UPDATE inventory_items
+        SET held_by = NULL,
+            location_id = $1
+        WHERE id = $2
+          AND held_by = $3
+        RETURNING id, name, held_by, location_id, state
+        "#,
+    )
+    .bind(&agent_location)
+    .bind(&payload.item_id)
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("item is not owned by this agent".to_string()))?;
+
+    let description = format!("Agent {} dropped item {}", agent_id, updated_item.id);
+
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("item.dropped")
+    .bind(&agent_id)
+    .bind(&agent_location)
+    .bind(description)
+    .bind(
+        serde_json::json!({
+            "item_id": updated_item.id,
+            "item_name": updated_item.name,
+        })
+        .to_string(),
+    )
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(updated_item))
 }
 
 pub async fn transfer_item_between_agents(
