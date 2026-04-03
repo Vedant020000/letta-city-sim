@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{
     Router,
-    routing::{get, patch},
+    routing::{delete, get, patch},
 };
 use dotenvy::dotenv;
 use tracing::{Level, info};
@@ -16,7 +16,10 @@ mod routes;
 mod state;
 
 use error::AppResult;
-use routes::agents::{get_agent_by_id, list_agents, update_agent_location};
+use routes::agents::{
+    clear_agent_activity, get_agent_by_id, list_agents, update_agent_activity,
+    update_agent_location,
+};
 use routes::locations::list_locations;
 use state::AppState;
 
@@ -43,6 +46,8 @@ async fn main() -> AppResult<()> {
         .route("/agents", get(list_agents))
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/location", patch(update_agent_location))
+        .route("/agents/:id/activity", patch(update_agent_activity))
+        .route("/agents/:id/activity", delete(clear_agent_activity))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
