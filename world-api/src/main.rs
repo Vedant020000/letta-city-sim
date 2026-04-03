@@ -20,7 +20,7 @@ use routes::agents::{
     clear_agent_activity, get_agent_by_id, list_agents, update_agent_activity,
     update_agent_location,
 };
-use routes::locations::list_locations;
+use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::pathfind::get_path;
 use state::AppState;
 
@@ -44,6 +44,8 @@ async fn main() -> AppResult<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/locations", get(list_locations))
+        .route("/locations/:id", get(get_location_by_id))
+        .route("/locations/:id/nearby", get(get_nearby_locations))
         .route("/pathfind", get(get_path))
         .route("/agents", get(list_agents))
         .route("/agents/:id", get(get_agent_by_id))
