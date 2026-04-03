@@ -20,6 +20,9 @@ use routes::agents::{
     clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
     update_agent_activity, update_agent_location,
 };
+use routes::board::{
+    clear_board, create_board_post, delete_board_post, get_board_posts, get_public_board,
+};
 use routes::inventory::transfer_item_between_agents;
 use routes::inventory::{
     add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory,
@@ -48,6 +51,11 @@ async fn main() -> AppResult<()> {
 
     let app = Router::new()
         .route("/health", get(health_check))
+        .route("/board", get(get_public_board))
+        .route("/board/posts", get(get_board_posts))
+        .route("/board/posts", patch(create_board_post))
+        .route("/board/posts/:post_id", delete(delete_board_post))
+        .route("/board/clear", delete(clear_board))
         .route("/locations", get(list_locations))
         .route("/world/time", get(get_world_time))
         .route("/locations/:id", get(get_location_by_id))
