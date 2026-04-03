@@ -2,7 +2,10 @@ use std::net::SocketAddr;
 
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{Router, routing::get};
+use axum::{
+    Router,
+    routing::{get, patch},
+};
 use dotenvy::dotenv;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
@@ -13,7 +16,7 @@ mod routes;
 mod state;
 
 use error::AppResult;
-use routes::agents::{get_agent_by_id, list_agents};
+use routes::agents::{get_agent_by_id, list_agents, update_agent_location};
 use routes::locations::list_locations;
 use state::AppState;
 
@@ -39,6 +42,7 @@ async fn main() -> AppResult<()> {
         .route("/locations", get(list_locations))
         .route("/agents", get(list_agents))
         .route("/agents/:id", get(get_agent_by_id))
+        .route("/agents/:id/location", patch(update_agent_location))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
