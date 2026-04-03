@@ -20,6 +20,7 @@ use routes::agents::{
     clear_agent_activity, get_agent_by_id, list_agents, update_agent_activity,
     update_agent_location,
 };
+use routes::inventory::transfer_item_between_agents;
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::pathfind::get_path;
 use state::AppState;
@@ -52,6 +53,10 @@ async fn main() -> AppResult<()> {
         .route("/agents/:id/location", patch(update_agent_location))
         .route("/agents/:id/activity", patch(update_agent_activity))
         .route("/agents/:id/activity", delete(clear_agent_activity))
+        .route(
+            "/agents/:id/inventory/transfer",
+            patch(transfer_item_between_agents),
+        )
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
