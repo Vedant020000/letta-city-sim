@@ -26,6 +26,7 @@ use routes::inventory::{
 };
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::pathfind::get_path;
+use routes::world::get_world_time;
 use state::AppState;
 
 #[tokio::main]
@@ -48,6 +49,7 @@ async fn main() -> AppResult<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/locations", get(list_locations))
+        .route("/world/time", get(get_world_time))
         .route("/locations/:id", get(get_location_by_id))
         .route("/locations/:id/nearby", get(get_nearby_locations))
         .route("/pathfind", get(get_path))
