@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("resource not found")]
+    NotFound,
+
     #[error("unexpected error: {0}")]
     Unexpected(String),
 }
@@ -30,6 +33,7 @@ impl IntoResponse for AppError {
             AppError::Database(_) => (StatusCode::INTERNAL_SERVER_ERROR, "database error"),
             AppError::Config(_) => (StatusCode::INTERNAL_SERVER_ERROR, "configuration error"),
             AppError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io error"),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "not found"),
             AppError::Unexpected(_) => (StatusCode::INTERNAL_SERVER_ERROR, "unexpected error"),
         };
 

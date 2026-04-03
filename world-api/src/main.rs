@@ -13,7 +13,7 @@ mod routes;
 mod state;
 
 use error::AppResult;
-use routes::agents::list_agents;
+use routes::agents::{get_agent_by_id, list_agents};
 use routes::locations::list_locations;
 use state::AppState;
 
@@ -38,6 +38,7 @@ async fn main() -> AppResult<()> {
         .route("/health", get(health_check))
         .route("/locations", get(list_locations))
         .route("/agents", get(list_agents))
+        .route("/agents/:id", get(get_agent_by_id))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
