@@ -11,11 +11,13 @@ use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod error;
+mod auth;
 mod models;
 mod routes;
 mod state;
 
 use error::AppResult;
+use auth::require_sim_key;
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
     update_agent_activity, update_agent_location,
@@ -84,6 +86,7 @@ async fn main() -> AppResult<()> {
             "/agents/:id/inventory/transfer",
             patch(transfer_item_between_agents),
         )
+        .layer(axum::middleware::from_fn(require_sim_key))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

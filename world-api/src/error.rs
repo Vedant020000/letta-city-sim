@@ -21,6 +21,9 @@ pub enum AppError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    #[error("unauthorized")]
+    Unauthorized,
+
     #[error("unexpected error: {0}")]
     Unexpected(String),
 }
@@ -38,6 +41,7 @@ impl IntoResponse for AppError {
             AppError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io error"),
             AppError::NotFound => (StatusCode::NOT_FOUND, "not found"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad request"),
+            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Unexpected(_) => (StatusCode::INTERNAL_SERVER_ERROR, "unexpected error"),
         };
 
