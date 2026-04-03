@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{
     Router,
-    routing::{delete, get, patch},
+    routing::{delete, get, patch, post},
 };
 use dotenvy::dotenv;
 use tracing::{Level, info};
@@ -23,11 +23,13 @@ use routes::agents::{
 use routes::board::{
     clear_board, create_board_post, delete_board_post, get_board_posts, get_public_board,
 };
+use routes::events::{create_event, list_events};
 use routes::inventory::transfer_item_between_agents;
 use routes::inventory::{
     add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory,
 };
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
+use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
 use routes::world::get_world_time;
 use state::AppState;
@@ -56,10 +58,14 @@ async fn main() -> AppResult<()> {
         .route("/board/posts", patch(create_board_post))
         .route("/board/posts/:post_id", delete(delete_board_post))
         .route("/board/clear", delete(clear_board))
+        .route("/events", get(list_events))
+        .route("/events", post(create_event))
         .route("/locations", get(list_locations))
         .route("/world/time", get(get_world_time))
         .route("/locations/:id", get(get_location_by_id))
         .route("/locations/:id/nearby", get(get_nearby_locations))
+        .route("/objects/:location_id", get(list_objects_by_location))
+        .route("/objects/:id", patch(update_object_state))
         .route("/pathfind", get(get_path))
         .route("/agents", get(list_agents))
         .route("/agents/move", patch(move_agent_with_header))
