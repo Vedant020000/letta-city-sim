@@ -169,6 +169,16 @@ function okStatus(statusCode) {
   return statusCode >= 200 && statusCode < 300;
 }
 
+function printNotification(notification) {
+  if (!notification || typeof notification !== "object") return;
+  const mode = notification.mode || notification.type || "unknown";
+  const eta = notification.eta_seconds ? ` (eta ~${notification.eta_seconds}s)` : "";
+  const message = notification.message || "";
+  const line = `[notify:${mode}] ${message}${eta}`.trim();
+  if (!line) return;
+  console.error(line);
+}
+
 async function callApi(ctx, route, { method = "GET", body, requiresAgent = false, requireSimKey = true } = {}) {
   const headers = {};
   if (requireSimKey) {
@@ -184,7 +194,25 @@ async function callApi(ctx, route, { method = "GET", body, requiresAgent = false
     body,
   });
 
-  const output = { ok: okStatus(statusCode), status_code: statusCode, data };
+  let payload = data;
+  let notification = null;
+
+  if (data && typeof data === "object") {
+    if (Object.prototype.hasOwnProperty.call(data, "data")) {
+      payload = data.data;
+    }
+    if (Object.prototype.hasOwnProperty.call(data, "notification")) {
+      notification = data.notification;
+    }
+  }
+
+  if (notification) {
+    printNotification(notification);
+  }
+
+  const output = { ok: okStatus(statusCode), status_code: statusCode, data: payload };
+  if (notification) output.notification = notification;
+
   console.log(JSON.stringify(output));
   return output.ok ? 0 : 1;
 }
