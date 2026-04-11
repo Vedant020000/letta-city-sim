@@ -69,6 +69,33 @@ Output is always JSON:
 
 All commands are designed for tool-calling and return machine-readable JSON.
 
+## Adding new commands
+
+`src/cli.mjs` exposes a declarative `COMMANDS` registry. Each entry describes how the CLI should call the World API:
+
+```js
+const COMMANDS = {
+  move_to: {
+    route: "/agents/move",
+    method: "PATCH",
+    requiresAgent: true,
+    buildBody: (options) => ({
+      location_id: required(options, "location-id"),
+    }),
+  },
+  // ...
+};
+```
+
+- **route** – string or `(ctx, options) => string`. Use the helper to compute dynamic URLs.
+- **method** – defaults to `GET`.
+- **requiresAgent** – automatically injects `x-agent-id` header when true.
+- **requireSimKey** – set to `false` for public endpoints (defaults to true).
+- **buildBody(options, ctx)** – optional function to construct the JSON body from CLI flags.
+- **handler(ctx, options)** – optional fully custom handler for advanced flows (`move_to_agent`, `daemon`, `lettabot_notify` use this).
+
+The `run()` function now just looks up the command in the registry and passes the parsed CLI flags to the shared executor. To add a new command (e.g., `go_to_job` or `cook`), define a registry entry and update the usage list at the top of the README.
+
 ## Notify LettaBot from the CLI
 
 The CLI daemon can forward simple text messages to a LettaBot agent via the `/v1/chat/completions` endpoint (default base `http://127.0.0.1:8080`).
