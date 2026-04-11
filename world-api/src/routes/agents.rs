@@ -9,6 +9,8 @@ use crate::auth::AgentId;
 use crate::error::AppError;
 use crate::error::AppResult;
 use crate::models::agent::Agent;
+use crate::models::common::{ApiResponse, NotificationMode, NotificationPayload};
+use crate::routes::pathfind::compute_shortest_path;
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -19,7 +21,7 @@ pub struct UpdateAgentLocationRequest {
 pub async fn agent_health_check(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
-) -> AppResult<Json<AgentHealthResponse>> {
+) -> AppResult<Json<ApiResponse<AgentHealthResponse>>> {
     let row = sqlx::query_as::<_, (String, String, String, String)>(
         r#"
         SELECT id, letta_agent_id, current_location_id, state
@@ -33,13 +35,13 @@ pub async fn agent_health_check(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    Ok(Json(AgentHealthResponse {
+    Ok(Json(ApiResponse::from(AgentHealthResponse {
         status: "ok".to_string(),
         agent_id: row.0,
         letta_agent_id: row.1,
         current_location_id: row.2,
         state: row.3,
-    }))
+    })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -56,7 +58,9 @@ pub struct AgentHealthResponse {
     pub state: String,
 }
 
-pub async fn list_agents(State(state): State<AppState>) -> AppResult<Json<Vec<Agent>>> {
+pub async fn list_agents(
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<Vec<Agent>>>> {
     let agents = sqlx::query_as::<_, Agent>(
         r#"
         SELECT
@@ -76,13 +80,13 @@ pub async fn list_agents(State(state): State<AppState>) -> AppResult<Json<Vec<Ag
     .fetch_all(state.pool())
     .await?;
 
-    Ok(Json(agents))
+    Ok(Json(ApiResponse::from(agents)))
 }
 
 pub async fn get_agent_by_id(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
-) -> AppResult<Json<Agent>> {
+) -> AppResult<Json<ApiResponse<Agent>>> {
     let agent = sqlx::query_as::<_, Agent>(
         r#"
         SELECT
@@ -104,14 +108,14 @@ pub async fn get_agent_by_id(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    Ok(Json(agent))
+    Ok(Json(ApiResponse::from(agent)))
 }
 
 pub async fn update_agent_location(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
     Json(payload): Json<UpdateAgentLocationRequest>,
-) -> AppResult<Json<Agent>> {
+) -> AppResult<Json<ApiResponse<Agent>>> {
     let updated_agent =
         perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
 
@@ -122,18 +126,17 @@ pub async fn move_agent_with_header(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
     Json(payload): Json<UpdateAgentLocationRequest>,
-) -> AppResult<Json<Agent>> {
-    let updated_agent =
-        perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
+) -> AppResult<Json<ApiResponse<Agent>>> {
+    let result = perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
 
-    Ok(Json(updated_agent))
+    Ok(Json(result))
 }
 
 async fn perform_agent_location_update(
     state: &AppState,
     agent_id: &str,
     location_id: &str,
-) -> AppResult<Agent> {
+) -> AppResult<ApiResponse<Agent>> {
     let mut tx = state.pool().begin().await?;
 
     let previous_location_id: Option<String> = sqlx::query_scalar(
@@ -251,6 +254,12 @@ async fn perform_agent_location_update(
             }),
         ));
 
+    let path_resp = compute_shortest_path(state.pool(), agent_id, location_id).await;
+    let travel_seconds = match path_resp {
+        Ok(resp) => resp.travel_time_seconds,
+        Err(_) => 0,
+    };
+
     let description = format!(
         "Agent {} moved to location {}",
         updated_agent.id, updated_agent.current_location_id
@@ -273,7 +282,33 @@ async fn perform_agent_location_update(
 
     tx.commit().await?;
 
-    Ok(updated_agent)
+    let notification_mode = if travel_seconds <= 15 {
+        NotificationMode::Instant
+    } else {
+        NotificationMode::Deferred
+    };
+
+    let notification = NotificationPayload {
+        message: if matches!(notification_mode, NotificationMode::Instant) {
+            format!("Arrived at {}.", updated_agent.current_location_id)
+        } else {
+            format!(
+                "Walking to {} (ETA ~{}s)",
+                updated_agent.current_location_id, travel_seconds
+            )
+        },
+        mode: notification_mode.clone(),
+        eta_seconds: if matches!(notification_mode, NotificationMode::Deferred) {
+            Some(travel_seconds as u64)
+        } else {
+            None
+        },
+    };
+
+    Ok(ApiResponse {
+        data: updated_agent,
+        notification: Some(notification),
+    })
 }
 
 pub async fn update_agent_activity(

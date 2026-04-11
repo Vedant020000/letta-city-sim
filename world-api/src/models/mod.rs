@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod board;
+pub mod common;
 pub mod event;
 pub mod inventory;
 pub mod location;

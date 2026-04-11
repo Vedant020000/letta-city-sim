@@ -6,6 +6,8 @@ use axum::{
 };
 use pathfinding::prelude::dijkstra;
 use serde::Deserialize;
+use sqlx::Pool;
+use sqlx::Postgres;
 
 use crate::error::{AppError, AppResult};
 use crate::models::pathfind::PathfindResponse;
@@ -27,11 +29,20 @@ pub async fn get_path(
     Query(query): Query<PathfindQuery>,
     State(state): State<AppState>,
 ) -> AppResult<Json<PathfindResponse>> {
-    if query.from == query.to {
-        return Ok(Json(PathfindResponse {
-            path: vec![query.from],
+    let response = compute_shortest_path(state.pool(), &query.from, &query.to).await?;
+    Ok(Json(response))
+}
+
+pub async fn compute_shortest_path(
+    pool: &Pool<Postgres>,
+    from: &str,
+    to: &str,
+) -> AppResult<PathfindResponse> {
+    if from == to {
+        return Ok(PathfindResponse {
+            path: vec![from.to_string()],
             travel_time_seconds: 0,
-        }));
+        });
     }
 
     let edges = sqlx::query_as::<_, (String, String, i32)>(
@@ -40,7 +51,7 @@ pub async fn get_path(
         FROM location_adjacency
         "#,
     )
-    .fetch_all(state.pool())
+    .fetch_all(pool)
     .await?;
 
     let mut graph: HashMap<String, Vec<Edge>> = HashMap::new();
@@ -51,8 +62,8 @@ pub async fn get_path(
             .push(Edge { to_id, travel_secs });
     }
 
-    let start = query.from.clone();
-    let goal = query.to.clone();
+    let start = from.to_string();
+    let goal = to.to_string();
 
     let result = dijkstra(
         &start,
@@ -75,8 +86,8 @@ pub async fn get_path(
         return Err(AppError::BadRequest("No route found".to_string()));
     }
 
-    Ok(Json(PathfindResponse {
+    Ok(PathfindResponse {
         path,
         travel_time_seconds: total_cost,
-    }))
+    })
 }
