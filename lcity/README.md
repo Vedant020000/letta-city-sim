@@ -26,6 +26,7 @@ node .\lcity\bin\lcity.mjs health_check
 - `world_time`
 - `list_inventory`
 - `board_read`, `board_posts`, `board_post --text`, `board_delete --post-id`, `board_clear`
+- `lettabot_notify --message "<text>" [--agent-id <id>]`
 
 ## Use `.lcity/agent_id`
 
@@ -67,3 +68,27 @@ Output is always JSON:
 ```
 
 All commands are designed for tool-calling and return machine-readable JSON.
+
+## Notify LettaBot from the CLI
+
+The CLI daemon can forward simple text messages to a LettaBot agent via the `/v1/chat/completions` endpoint (default base `http://127.0.0.1:8080`).
+
+1. Export LettaBot credentials and start the daemon:
+
+```powershell
+$env:SIM_API_KEY="devkey"
+$env:LETTABOT_API_KEY="user-api-key"
+$env:LETTABOT_BASE="http://127.0.0.1:8080" # optional, defaults to https://api.letta.com
+lcity daemon --start --lettabot-base $env:LETTABOT_BASE
+```
+
+2. Send a notification once the daemon is running:
+
+```powershell
+lcity lettabot_notify --message "Task finished"
+
+# override agent id if needed
+lcity lettabot_notify --message "Broadcast" --agent-id sam_moore
+```
+
+Under the hood, the CLI posts to the local daemon (`/notify`), which reuses your `LETTABOT_API_KEY` + base URL to call `/v1/chat/completions`.

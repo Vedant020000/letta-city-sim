@@ -9,20 +9,10 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function wakeAgentViaLettaBot({ lettabotBase, lettabotKey, agentId, envelope }) {
-  // NOTE: Vedant confirmed LettaBot /v1/chat/completions is a persistent agent call.
-  // We keep payload minimal and deterministic; tools/agent logic should interpret the event.
+async function postLettaBotCompletion({ lettabotBase, lettabotKey, agentId, messages }) {
   const body = {
     agent_id: agentId,
-    messages: [
-      {
-        role: "user",
-        content: JSON.stringify({
-          kind: "world_event",
-          event: envelope,
-        }),
-      },
-    ],
+    messages,
   };
 
   return fetch(`${lettabotBase.replace(/\/$/, "")}/v1/chat/completions`, {
@@ -33,6 +23,38 @@ async function wakeAgentViaLettaBot({ lettabotBase, lettabotKey, agentId, envelo
     },
     body: JSON.stringify(body),
   });
+}
+
+async function wakeAgentViaLettaBot({ lettabotBase, lettabotKey, agentId, envelope }) {
+  // NOTE: Vedant confirmed LettaBot /v1/chat/completions is a persistent agent call.
+  // We keep payload minimal and deterministic; tools/agent logic should interpret the event.
+  const messages = [
+    {
+      role: "user",
+      content: JSON.stringify({
+        kind: "world_event",
+        event: envelope,
+      }),
+    },
+  ];
+
+  return postLettaBotCompletion({ lettabotBase, lettabotKey, agentId, messages });
+}
+
+async function sendLettaBotMessage({ lettabotBase, lettabotKey, agentId, message }) {
+  const trimmed = String(message || "").trim();
+  if (!trimmed) {
+    throw new Error("message cannot be empty");
+  }
+
+  const messages = [
+    {
+      role: "user",
+      content: trimmed,
+    },
+  ];
+
+  return postLettaBotCompletion({ lettabotBase, lettabotKey, agentId, messages });
 }
 
 function parseCli(argv) {
@@ -93,6 +115,26 @@ function resolveSimKey(simKey) {
   throw new Error("missing SIM_API_KEY (set env or pass --sim-key)");
 }
 
+async function readRequestBody(req, limit = 4096) {
+  const chunks = [];
+  let total = 0;
+  return new Promise((resolve, reject) => {
+    req.on("data", (chunk) => {
+      total += chunk.length;
+      if (total > limit) {
+        req.destroy();
+        reject(new Error("body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", reject);
+  });
+}
+
 async function requestJson(url, { method = "GET", headers = {}, body } = {}) {
   const req = {
     method,
@@ -147,6 +189,49 @@ async function callApi(ctx, route, { method = "GET", body, requiresAgent = false
   return output.ok ? 0 : 1;
 }
 
+async function notifyDaemon(ctx, { message, agentId }) {
+  const trimmedMessage = String(message || "").trim();
+  if (!trimmedMessage) {
+    throw new Error("message cannot be empty");
+  }
+
+  const resolvedAgentId = agentId && String(agentId).trim()
+    ? String(agentId).trim()
+    : resolveAgentId(ctx.agentIdFile);
+
+  const url = `http://127.0.0.1:${ctx.daemonPort}/notify`;
+  const payload = {
+    message: trimmedMessage,
+    agent_id: resolvedAgentId,
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { raw: text };
+      }
+    }
+    const output = { ok: response.ok && data.ok !== false, status_code: response.status, data };
+    console.log(JSON.stringify(output));
+    return output.ok ? 0 : 1;
+  } catch (err) {
+    console.log(JSON.stringify({
+      ok: false,
+      error: `failed to reach daemon notify endpoint: ${err.message}`,
+    }));
+    return 1;
+  }
+}
+
 function usage() {
   return [
     "Set SIM_API_KEY env (or use --sim-key) before invoking commands",
@@ -164,6 +249,7 @@ function usage() {
     "lcity board_post --text \"Town hall at 6 PM\"",
     "lcity board_delete --post-id <id>",
     "lcity board_clear",
+    "lcity lettabot_notify --message \"Wrap up\"",
     "lcity daemon --start",
     "lcity daemon --stop",
     "lcity daemon --status",
@@ -180,6 +266,11 @@ function daemonPidPath(ctx) {
 
 function daemonLogPath(ctx) {
   return path.join(ctx.daemonDir, "daemon.log");
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(payload));
 }
 
 function wsUrlFromApiBase(apiBase) {
@@ -287,6 +378,7 @@ async function daemonStart(ctx, options) {
   if (options["ws-url"]) childArgs.push("--ws-url", String(options["ws-url"]));
   if (options["sim-key"]) childArgs.push("--sim-key", String(options["sim-key"]));
   if (options["lettabot-key"]) childArgs.push("--lettabot-key", String(options["lettabot-key"]));
+  if (options["lettabot-base"]) childArgs.push("--lettabot-base", String(options["lettabot-base"]));
 
   const logFile = fs.openSync(daemonLogPath(ctx), "a");
   const spawnOpts = {
@@ -334,7 +426,9 @@ async function daemonRun(ctx, options) {
   const wsUrl = String(options["ws-url"] || wsUrlFromApiBase(ctx.apiBase));
   const simKey = String(options["sim-key"] || ctx.simKey || process.env.SIM_API_KEY || "");
   const lettabotKey = String(options["lettabot-key"] || process.env.LETTABOT_API_KEY || "");
-  const lettabotBase = String(process.env.LETTABOT_BASE || "https://api.letta.com");
+  const lettabotBase = String(
+    options["lettabot-base"] || process.env.LETTABOT_BASE || "https://api.letta.com",
+  );
 
   if (!simKey) {
     console.log(JSON.stringify({ ok: false, error: "missing SIM_API_KEY (or pass --sim-key)" }));
@@ -361,6 +455,53 @@ async function daemonRun(ctx, options) {
       shuttingDown = true;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/notify") {
+      try {
+        const rawBody = await readRequestBody(req, 4096);
+        let payload = {};
+        try {
+          payload = rawBody ? JSON.parse(rawBody) : {};
+        } catch {
+          sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+          return;
+        }
+
+        const message = typeof payload.message === "string" ? payload.message.trim() : "";
+        if (!message) {
+          sendJson(res, 400, { ok: false, error: "missing message" });
+          return;
+        }
+
+        const agentId = typeof payload.agent_id === "string" ? payload.agent_id.trim() : "";
+        if (!agentId) {
+          sendJson(res, 400, { ok: false, error: "missing agent_id" });
+          return;
+        }
+
+        const lettabotResp = await sendLettaBotMessage({
+          lettabotBase,
+          lettabotKey,
+          agentId,
+          message,
+        });
+
+        if (!lettabotResp.ok) {
+          const errorText = await lettabotResp.text();
+          sendJson(res, lettabotResp.status || 500, {
+            ok: false,
+            error: errorText || "LettaBot notify failed",
+          });
+          return;
+        }
+
+        appendLog(ctx, `notify agent=${agentId} len=${message.length} status=${lettabotResp.status}`);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        appendLog(ctx, `notify error=${err.message}`);
+        sendJson(res, 500, { ok: false, error: err.message });
+      }
       return;
     }
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -526,6 +667,11 @@ export async function run(argv) {
         });
       case "board_clear":
         return callApi(ctx, "/board/clear", { method: "DELETE", requiresAgent: true });
+      case "lettabot_notify": {
+        const message = required(options, "message");
+        const agentOverride = options["agent-id"] ? String(options["agent-id"]).trim() : undefined;
+        return notifyDaemon(ctx, { message, agentId: agentOverride });
+      }
       case "daemon": {
         if (options.run === "true") return daemonRun(ctx, options);
         if (options.start === "true") return daemonStart(ctx, options);
