@@ -59,6 +59,34 @@ curl.exe http://localhost:3001/world/time
 
 For full manual validation, use `test.md`.
 
+## Authentication & CLI helper
+
+All mutating REST routes on `world-api` now require:
+
+- `x-sim-key` header — matches `SIM_API_KEY` configured on the server.
+- `x-agent-id` header — ID (or `letta_agent_id`) of the acting NPC.
+
+Set the SIM key in your shell before running CLI commands:
+
+```powershell
+$env:SIM_API_KEY="dev_key_change_me"
+node .\lcity\bin\lcity.mjs health_check
+```
+
+The CLI reads the agent ID from `.lcity/agent_id` (see `lcity/README.md`) and automatically attaches both headers for every request. Use `--sim-key <value>` per command if you prefer not to export the env var.
+
+Sample write request (curl):
+
+```powershell
+curl.exe -X PATCH http://localhost:3001/board/posts ^
+  -H "Content-Type: application/json" ^
+  -H "x-sim-key: dev_key_change_me" ^
+  -H "x-agent-id: eddy_lin" ^
+  -d '{"text":"Town hall at 6 PM"}'
+```
+
+Read-only endpoints continue to work without headers.
+
 ## Documentation
 - Canonical product brief: `docs/letta-city-sim-prd.md`
 - Full execution checklist: `docs/letta-city-sim-extensive-todo.md`
