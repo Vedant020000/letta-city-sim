@@ -260,6 +260,133 @@ async function notifyDaemon(ctx, { message, agentId }) {
   }
 }
 
+const COMMANDS = {
+  health_check: {
+    route: "/agents/health",
+    requiresAgent: true,
+  },
+  move_to: {
+    route: "/agents/move",
+    method: "PATCH",
+    requiresAgent: true,
+    buildBody: (options) => ({
+      location_id: required(options, "location-id"),
+    }),
+  },
+  move_to_agent: {
+    handler: handleMoveToAgent,
+  },
+  list_locations: {
+    route: "/locations",
+  },
+  get_location: {
+    route: (_ctx, options) =>
+      `/locations/${encodeURIComponent(required(options, "id"))}`,
+  },
+  nearby_locations: {
+    route: (_ctx, options) =>
+      `/locations/${encodeURIComponent(required(options, "id"))}/nearby`,
+  },
+  pathfind: {
+    route: (_ctx, options) => {
+      const from = encodeURIComponent(required(options, "from"));
+      const to = encodeURIComponent(required(options, "to"));
+      return `/pathfind?from=${from}&to=${to}`;
+    },
+  },
+  world_time: {
+    route: "/world/time",
+  },
+  list_inventory: {
+    route: (ctx) =>
+      `/inventory/${encodeURIComponent(resolveAgentId(ctx.agentIdFile))}`,
+  },
+  board_read: {
+    route: "/board",
+  },
+  board_posts: {
+    route: "/board/posts",
+  },
+  board_post: {
+    route: "/board/posts",
+    method: "PATCH",
+    requiresAgent: true,
+    buildBody: (options) => ({
+      text: required(options, "text"),
+    }),
+  },
+  board_delete: {
+    route: (_ctx, options) =>
+      `/board/posts/${encodeURIComponent(required(options, "post-id"))}`,
+    method: "DELETE",
+    requiresAgent: true,
+  },
+  board_clear: {
+    route: "/board/clear",
+    method: "DELETE",
+    requiresAgent: true,
+  },
+};
+
+async function executeDeclarativeCommand(ctx, def, options) {
+  if (typeof def.handler === "function") {
+    return def.handler(ctx, options);
+  }
+
+  const routeBuilder = def.route;
+  if (!routeBuilder) {
+    throw new Error("command route is not configured");
+  }
+
+  const route = typeof routeBuilder === "function" ? routeBuilder(ctx, options) : routeBuilder;
+  if (!route) {
+    throw new Error("command route resolved to empty value");
+  }
+
+  const body = def.buildBody ? def.buildBody(options, ctx) : undefined;
+  const method = def.method || "GET";
+  const requiresAgent = Boolean(def.requiresAgent);
+  const requireSimKey = def.requireSimKey !== false;
+
+  return callApi(ctx, route, {
+    method,
+    requiresAgent,
+    requireSimKey,
+    body,
+  });
+}
+
+async function handleMoveToAgent(ctx, options) {
+  const targetAgentId = required(options, "target-agent-id");
+  const targetResp = await requestJson(
+    `${ctx.apiBase.replace(/\/$/, "")}/agents/${encodeURIComponent(targetAgentId)}`,
+  );
+  if (!okStatus(targetResp.statusCode)) {
+    console.log(
+      JSON.stringify({
+        ok: false,
+        status_code: targetResp.statusCode,
+        data: targetResp.data,
+      }),
+    );
+    return 1;
+  }
+
+  const targetLocation = targetResp.data.current_location_id;
+  if (!targetLocation) {
+    console.log(
+      JSON.stringify({ ok: false, error: "target agent has no current_location_id" }),
+    );
+    return 1;
+  }
+
+  return callApi(ctx, "/agents/move", {
+    method: "PATCH",
+    requiresAgent: true,
+    body: { location_id: targetLocation },
+  });
+}
+
 function usage() {
   return [
     "Set SIM_API_KEY env (or use --sim-key) before invoking commands",
