@@ -10,14 +10,15 @@ use dotenvy::dotenv;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
-mod error;
 mod auth;
+mod error;
 mod models;
 mod routes;
 mod state;
+mod ws_events;
 
-use error::AppResult;
 use auth::require_sim_key;
+use error::AppResult;
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
     update_agent_activity, update_agent_location,
@@ -35,6 +36,7 @@ use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
 use routes::world::get_world_time;
 use state::AppState;
+use ws_events::ws_events;
 
 #[tokio::main]
 async fn main() -> AppResult<()> {
@@ -62,6 +64,7 @@ async fn main() -> AppResult<()> {
         .route("/board/clear", delete(clear_board))
         .route("/events", get(list_events))
         .route("/events", post(create_event))
+        .route("/ws/events", get(ws_events))
         .route("/locations", get(list_locations))
         .route("/world/time", get(get_world_time))
         .route("/locations/:id", get(get_location_by_id))

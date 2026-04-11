@@ -11,6 +11,8 @@ This package is structured to be published independently.
 ## Run directly
 
 ```powershell
+$env:SIM_API_KEY="<your-sim-key>"
+$env:LCITY_API_BASE="http://localhost:3001" # optional override
 node .\lcity\bin\lcity.mjs health_check
 ```
 
@@ -28,6 +30,7 @@ node .\lcity\bin\lcity.mjs health_check
 ## Use `.lcity/agent_id`
 
 ```powershell
+$env:SIM_API_KEY="<your-sim-key>"
 New-Item -ItemType Directory -Force .lcity | Out-Null
 Set-Content .lcity\agent_id "eddy_lin"
 node .\lcity\bin\lcity.mjs health_check
@@ -45,6 +48,16 @@ Optional base URL override:
 
 ```powershell
 node .\lcity\bin\lcity.mjs --api-base http://localhost:3001 health_check
+```
+
+SIM API key options:
+
+```powershell
+# env var
+$env:SIM_API_KEY="devkey"
+
+# or one-off CLI flag
+node .\lcity\bin\lcity.mjs --sim-key devkey board_read
 ```
 
 Output is always JSON:

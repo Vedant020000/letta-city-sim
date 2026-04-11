@@ -1,11 +1,11 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::HeaderMap,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AgentId;
 use crate::error::AppError;
 use crate::error::AppResult;
 use crate::models::agent::Agent;
@@ -18,22 +18,8 @@ pub struct UpdateAgentLocationRequest {
 
 pub async fn agent_health_check(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AgentId(agent_id): AgentId,
 ) -> AppResult<Json<AgentHealthResponse>> {
-    let agent_id = headers
-        .get("x-agent-id")
-        .ok_or_else(|| AppError::BadRequest("missing x-agent-id header".to_string()))?
-        .to_str()
-        .map_err(|_| AppError::BadRequest("invalid x-agent-id header".to_string()))?
-        .trim()
-        .to_string();
-
-    if agent_id.is_empty() {
-        return Err(AppError::BadRequest(
-            "x-agent-id header cannot be empty".to_string(),
-        ));
-    }
-
     let row = sqlx::query_as::<_, (String, String, String, String)>(
         r#"
         SELECT id, letta_agent_id, current_location_id, state
@@ -134,22 +120,9 @@ pub async fn update_agent_location(
 
 pub async fn move_agent_with_header(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AgentId(agent_id): AgentId,
     Json(payload): Json<UpdateAgentLocationRequest>,
 ) -> AppResult<Json<Agent>> {
-    let agent_id = headers
-        .get("x-agent-id")
-        .ok_or_else(|| AppError::BadRequest("missing x-agent-id header".to_string()))?
-        .to_str()
-        .map_err(|_| AppError::BadRequest("invalid x-agent-id header".to_string()))?
-        .to_string();
-
-    if agent_id.trim().is_empty() {
-        return Err(AppError::BadRequest(
-            "x-agent-id header cannot be empty".to_string(),
-        ));
-    }
-
     let updated_agent =
         perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
 
@@ -162,6 +135,52 @@ async fn perform_agent_location_update(
     location_id: &str,
 ) -> AppResult<Agent> {
     let mut tx = state.pool().begin().await?;
+
+    let previous_location_id: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT current_location_id
+        FROM agents
+        WHERE id = $1
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    // Broadcast location exit/enter events for WS subscribers (best effort).
+    // Routing key for daemon filtering: `agent_targets`.
+    // v1 policy: mover + all agents currently in the affected location.
+    if let Some(from_loc) = previous_location_id.clone() {
+        if from_loc != location_id {
+            let mut from_targets: Vec<String> = sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT id
+                FROM agents
+                WHERE current_location_id = $1
+                "#,
+            )
+            .bind(&from_loc)
+            .fetch_all(&mut *tx)
+            .await?;
+
+            if !from_targets.contains(&agent_id.to_string()) {
+                from_targets.push(agent_id.to_string());
+            }
+
+            let _ = state
+                .event_tx()
+                .send(crate::ws_events::WorldEventEnvelope::new(
+                    "location.exit",
+                    from_targets,
+                    Some(from_loc.clone()),
+                    serde_json::json!({
+                        "agent_id": agent_id,
+                        "from_location_id": from_loc,
+                        "to_location_id": location_id,
+                    }),
+                ));
+        }
+    }
 
     let exists = sqlx::query_scalar::<_, String>(
         r#"
@@ -203,6 +222,34 @@ async fn perform_agent_location_update(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::NotFound)?;
+
+    let mut to_targets: Vec<String> = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT id
+        FROM agents
+        WHERE current_location_id = $1
+        "#,
+    )
+    .bind(&updated_agent.current_location_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    if !to_targets.contains(&updated_agent.id) {
+        to_targets.push(updated_agent.id.clone());
+    }
+
+    let _ = state
+        .event_tx()
+        .send(crate::ws_events::WorldEventEnvelope::new(
+            "location.enter",
+            to_targets,
+            Some(updated_agent.current_location_id.clone()),
+            serde_json::json!({
+                "agent_id": updated_agent.id,
+                "from_location_id": previous_location_id,
+                "to_location_id": updated_agent.current_location_id,
+            }),
+        ));
 
     let description = format!(
         "Agent {} moved to location {}",

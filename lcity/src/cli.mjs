@@ -1,10 +1,47 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import http from "node:http";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function wakeAgentViaLettaBot({ lettabotBase, lettabotKey, agentId, envelope }) {
+  // NOTE: Vedant confirmed LettaBot /v1/chat/completions is a persistent agent call.
+  // We keep payload minimal and deterministic; tools/agent logic should interpret the event.
+  const body = {
+    agent_id: agentId,
+    messages: [
+      {
+        role: "user",
+        content: JSON.stringify({
+          kind: "world_event",
+          event: envelope,
+        }),
+      },
+    ],
+  };
+
+  return fetch(`${lettabotBase.replace(/\/$/, "")}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${lettabotKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
 
 function parseCli(argv) {
   const ctx = {
     apiBase: process.env.LCITY_API_BASE || "http://localhost:3001",
     agentIdFile: path.join(".lcity", "agent_id"),
+    daemonDir: path.join(process.cwd(), ".lcity"),
+    daemonPort: Number(process.env.LCITY_DAEMON_PORT || 48483),
+    simKey: process.env.SIM_API_KEY || "",
   };
 
   const tokens = [...argv];
@@ -12,6 +49,9 @@ function parseCli(argv) {
     const token = tokens.shift();
     if (token === "--api-base") ctx.apiBase = tokens.shift() || ctx.apiBase;
     if (token === "--agent-id-file") ctx.agentIdFile = tokens.shift() || ctx.agentIdFile;
+    if (token === "--daemon-dir") ctx.daemonDir = tokens.shift() || ctx.daemonDir;
+    if (token === "--daemon-port") ctx.daemonPort = Number(tokens.shift() || ctx.daemonPort);
+    if (token === "--sim-key") ctx.simKey = tokens.shift() || ctx.simKey;
   }
 
   const command = tokens.shift() || null;
@@ -48,6 +88,11 @@ function resolveAgentId(agentIdFile) {
   }
 }
 
+function resolveSimKey(simKey) {
+  if (simKey && String(simKey).trim()) return String(simKey).trim();
+  throw new Error("missing SIM_API_KEY (set env or pass --sim-key)");
+}
+
 async function requestJson(url, { method = "GET", headers = {}, body } = {}) {
   const req = {
     method,
@@ -82,8 +127,11 @@ function okStatus(statusCode) {
   return statusCode >= 200 && statusCode < 300;
 }
 
-async function callApi(ctx, route, { method = "GET", body, requiresAgent = false } = {}) {
+async function callApi(ctx, route, { method = "GET", body, requiresAgent = false, requireSimKey = true } = {}) {
   const headers = {};
+  if (requireSimKey) {
+    headers["x-sim-key"] = resolveSimKey(ctx.simKey);
+  }
   if (requiresAgent) {
     headers["x-agent-id"] = resolveAgentId(ctx.agentIdFile);
   }
@@ -101,6 +149,7 @@ async function callApi(ctx, route, { method = "GET", body, requiresAgent = false
 
 function usage() {
   return [
+    "Set SIM_API_KEY env (or use --sim-key) before invoking commands",
     "lcity health_check",
     "lcity move_to --location-id lin_kitchen",
     "lcity move_to_agent --target-agent-id sam_moore",
@@ -115,7 +164,284 @@ function usage() {
     "lcity board_post --text \"Town hall at 6 PM\"",
     "lcity board_delete --post-id <id>",
     "lcity board_clear",
+    "lcity daemon --start",
+    "lcity daemon --stop",
+    "lcity daemon --status",
   ];
+}
+
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function daemonPidPath(ctx) {
+  return path.join(ctx.daemonDir, "daemon.pid");
+}
+
+function daemonLogPath(ctx) {
+  return path.join(ctx.daemonDir, "daemon.log");
+}
+
+function wsUrlFromApiBase(apiBase) {
+  const trimmed = apiBase.replace(/\/$/, "");
+  if (trimmed.startsWith("https://")) return `wss://${trimmed.slice("https://".length)}/ws/events`;
+  if (trimmed.startsWith("http://")) return `ws://${trimmed.slice("http://".length)}/ws/events`;
+  // fallback
+  return `${trimmed}/ws/events`;
+}
+
+async function fetchWithTimeout(url, { method = "GET", headers = {}, body, timeoutMs = 750 } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: controller.signal,
+    });
+    const text = await resp.text();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { raw: text };
+      }
+    }
+    return { ok: resp.ok, statusCode: resp.status, data };
+  } catch (err) {
+    return { ok: false, statusCode: 0, data: { error: err.message } };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function daemonStatus(ctx) {
+  const url = `http://127.0.0.1:${ctx.daemonPort}/health`;
+  const resp = await fetchWithTimeout(url);
+  return resp.ok;
+}
+
+async function daemonStop(ctx) {
+  const running = await daemonStatus(ctx);
+  if (!running) {
+    console.log(JSON.stringify({ ok: true, already_stopped: true }));
+    return 0;
+  }
+
+  await fetchWithTimeout(`http://127.0.0.1:${ctx.daemonPort}/shutdown`, {
+    method: "POST",
+    timeoutMs: 1500,
+  });
+
+  // wait a moment for shutdown
+  await new Promise((r) => setTimeout(r, 300));
+  if (!(await daemonStatus(ctx))) {
+    console.log(JSON.stringify({ ok: true, stopped: true }));
+    return 0;
+  }
+
+  // fallback: kill by pid
+  try {
+    const pidFile = daemonPidPath(ctx);
+    if (fs.existsSync(pidFile)) {
+      const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+      if (Number.isFinite(pid)) {
+        process.kill(pid);
+      }
+    }
+  } catch (err) {
+    console.log(JSON.stringify({ ok: false, error: `failed to stop daemon: ${err.message}` }));
+    return 1;
+  }
+
+  console.log(JSON.stringify({ ok: true, stopped: true, forced: true }));
+  return 0;
+}
+
+async function daemonStart(ctx, options) {
+  if (await daemonStatus(ctx)) {
+    console.log(JSON.stringify({ ok: true, already_running: true }));
+    return 0;
+  }
+
+  ensureDir(ctx.daemonDir);
+
+  const node = process.execPath;
+  // Important on Windows: use fileURLToPath to avoid leading / and %XX escaping.
+  const entry = fileURLToPath(new URL("../bin/lcity.mjs", import.meta.url));
+
+  const childArgs = [
+    "--api-base",
+    ctx.apiBase,
+    "--daemon-dir",
+    ctx.daemonDir,
+    "--daemon-port",
+    String(ctx.daemonPort),
+    "daemon",
+    "--run",
+  ];
+
+  // pass through optional overrides
+  if (options["ws-url"]) childArgs.push("--ws-url", String(options["ws-url"]));
+  if (options["sim-key"]) childArgs.push("--sim-key", String(options["sim-key"]));
+  if (options["lettabot-key"]) childArgs.push("--lettabot-key", String(options["lettabot-key"]));
+
+  const logFile = fs.openSync(daemonLogPath(ctx), "a");
+  const spawnOpts = {
+    detached: true,
+    stdio: ["ignore", logFile, logFile],
+    windowsHide: true,
+    cwd: process.cwd(),
+    env: process.env,
+  };
+  if (process.platform === "win32") {
+    // mimic CREATE_NO_WINDOW behavior in sturdy Windows daemons
+    spawnOpts.CREATE_NO_WINDOW = 0x08000000;
+  }
+
+  const child = spawn(node, [entry, ...childArgs], spawnOpts);
+  child.unref();
+
+  console.log(JSON.stringify({ ok: true, started: true }));
+  return 0;
+}
+
+function appendLog(ctx, line) {
+  try {
+    ensureDir(ctx.daemonDir);
+    fs.appendFileSync(daemonLogPath(ctx), `${new Date().toISOString()} ${line}${os.EOL}`);
+  } catch {
+    // ignore logging errors in daemon
+  }
+}
+
+function writePid(ctx) {
+  ensureDir(ctx.daemonDir);
+  fs.writeFileSync(daemonPidPath(ctx), String(process.pid), "utf8");
+}
+
+function removePid(ctx) {
+  try {
+    fs.unlinkSync(daemonPidPath(ctx));
+  } catch {
+    // ignore
+  }
+}
+
+async function daemonRun(ctx, options) {
+  const wsUrl = String(options["ws-url"] || wsUrlFromApiBase(ctx.apiBase));
+  const simKey = String(options["sim-key"] || ctx.simKey || process.env.SIM_API_KEY || "");
+  const lettabotKey = String(options["lettabot-key"] || process.env.LETTABOT_API_KEY || "");
+  const lettabotBase = String(process.env.LETTABOT_BASE || "https://api.letta.com");
+
+  if (!simKey) {
+    console.log(JSON.stringify({ ok: false, error: "missing SIM_API_KEY (or pass --sim-key)" }));
+    return 1;
+  }
+  if (!lettabotKey) {
+    console.log(JSON.stringify({ ok: false, error: "missing LETTABOT_API_KEY (or pass --lettabot-key)" }));
+    return 1;
+  }
+
+  ensureDir(ctx.daemonDir);
+  writePid(ctx);
+  appendLog(ctx, `daemon starting port=${ctx.daemonPort} ws=${wsUrl}`);
+
+  let shuttingDown = false;
+
+  const server = http.createServer(async (req, res) => {
+    if (req.method === "GET" && req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/shutdown") {
+      shuttingDown = true;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "not found" }));
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(ctx.daemonPort, "127.0.0.1", () => resolve());
+  });
+
+  // WS loop (reconnect with backoff)
+  let backoffMs = 250;
+  try {
+    while (!shuttingDown) {
+      appendLog(ctx, `ws connecting url=${wsUrl}`);
+      const ws = new WebSocket(wsUrl, { headers: { "x-sim-key": simKey } });
+
+      let wsOpen = false;
+      ws.onopen = () => {
+        wsOpen = true;
+        backoffMs = 250;
+        appendLog(ctx, "ws connected");
+      };
+      ws.onerror = (err) => {
+        appendLog(ctx, `ws error=${err.message || err}`);
+      };
+      ws.onclose = () => {
+        appendLog(ctx, "ws closed");
+      };
+      ws.onmessage = async (ev) => {
+        try {
+          const envelope = JSON.parse(String(ev.data || "{}"));
+          const targets = Array.isArray(envelope.agent_targets)
+            ? envelope.agent_targets
+            : [];
+          if (targets.length === 0) return;
+
+          for (const agentId of targets) {
+            const resp = await wakeAgentViaLettaBot({
+              lettabotBase,
+              lettabotKey,
+              agentId,
+              envelope,
+            });
+            appendLog(
+              ctx,
+              `wake agent=${agentId} event=${envelope.type || envelope.event_type} status=${resp.status}`,
+            );
+          }
+        } catch (err) {
+          appendLog(ctx, `onmessage error=${err.message}`);
+        }
+      };
+
+      // wait until shutdown or socket closes
+      while (!shuttingDown && ws.readyState !== WebSocket.CLOSED) {
+        await sleep(250);
+      }
+
+      try {
+        if (wsOpen) ws.close();
+      } catch {
+        // ignore
+      }
+
+      if (shuttingDown) break;
+
+      // backoff before reconnect
+      await sleep(backoffMs);
+      backoffMs = Math.min(backoffMs * 2, 5000);
+    }
+  } catch (err) {
+    appendLog(ctx, `daemon loop error=${err.message}`);
+  } finally {
+    server.close();
+    removePid(ctx);
+    appendLog(ctx, "daemon stopped");
+  }
+
+  return 0;
 }
 
 export async function run(argv) {
@@ -200,12 +526,26 @@ export async function run(argv) {
         });
       case "board_clear":
         return callApi(ctx, "/board/clear", { method: "DELETE", requiresAgent: true });
+      case "daemon": {
+        if (options.run === "true") return daemonRun(ctx, options);
+        if (options.start === "true") return daemonStart(ctx, options);
+        if (options.stop === "true") return daemonStop(ctx);
+        if (options.status === "true") {
+          const running = await daemonStatus(ctx);
+          console.log(JSON.stringify({ ok: true, running }));
+          return 0;
+        }
+        console.log(JSON.stringify({ ok: false, error: "missing --start/--stop/--status (or internal --run)" }));
+        return 1;
+      }
       default:
         console.log(JSON.stringify({ ok: false, error: `unknown command: ${command}` }));
         return 1;
     }
   } catch (err) {
-    console.log(JSON.stringify({ ok: false, error: err.message }));
+    const errorData = { ok: false, error: err.message };
+    if (err.cause) errorData.cause = err.cause;
+    console.log(JSON.stringify(errorData));
     return 1;
   }
 }

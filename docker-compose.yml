@@ -30,7 +30,7 @@ services:
       - "3001:3001"
     volumes:
       - ./world-api:/app
-    command: ["cargo", "watch", "-x", "run"]
+    command: ["cargo", "run"]
 
   frontend:
     build: ./frontend

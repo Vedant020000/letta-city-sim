@@ -1,10 +1,12 @@
 use sqlx::postgres::PgPoolOptions;
+use tokio::sync::broadcast;
 
 use crate::error::AppResult;
 
 #[derive(Clone)]
 pub struct AppState {
     pool: sqlx::Pool<sqlx::Postgres>,
+    event_tx: broadcast::Sender<crate::ws_events::WorldEventEnvelope>,
 }
 
 impl AppState {
@@ -14,10 +16,17 @@ impl AppState {
             .connect(database_url)
             .await?;
 
-        Ok(Self { pool })
+        // Size is small; if consumers lag they can drop messages.
+        let (event_tx, _event_rx) = broadcast::channel(256);
+
+        Ok(Self { pool, event_tx })
     }
 
     pub fn pool(&self) -> &sqlx::Pool<sqlx::Postgres> {
         &self.pool
+    }
+
+    pub fn event_tx(&self) -> &broadcast::Sender<crate::ws_events::WorldEventEnvelope> {
+        &self.event_tx
     }
 }

@@ -1,15 +1,16 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::HeaderMap,
 };
 use chrono::Utc;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::auth::AgentId;
 use crate::error::{AppError, AppResult};
 use crate::models::board::{BoardPost, BoardStateWithIds, PublicBoardState};
 use crate::state::AppState;
+use crate::ws_events::WorldEventEnvelope;
 
 const BOARD_OBJECT_ID: &str = "notice_board_main";
 
@@ -43,10 +44,9 @@ pub async fn get_board_posts(State(state): State<AppState>) -> AppResult<Json<Bo
 
 pub async fn create_board_post(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AgentId(actor_id): AgentId,
     Json(payload): Json<CreateBoardPostRequest>,
 ) -> AppResult<Json<BoardPost>> {
-    let actor_id = parse_actor_id(&headers)?;
     let text = payload.text.trim();
 
     if text.is_empty() {
@@ -88,6 +88,32 @@ pub async fn create_board_post(
     .execute(&mut *tx)
     .await?;
 
+    // Broadcast WS event (best effort). Target: all agents currently at the board's location.
+    let targets: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT id
+        FROM agents
+        WHERE current_location_id = $1
+        "#,
+    )
+    .bind(&location_id)
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+
+    let _ = state.event_tx().send(WorldEventEnvelope::new(
+        "board.posted",
+        targets,
+        Some(location_id.clone()),
+        serde_json::json!({
+            "post_id": post.id,
+            "text": post.text,
+            "created_at": post.created_at,
+            "actor_id": actor_id,
+        }),
+    ));
+
     tx.commit().await?;
 
     Ok(Json(post))
@@ -95,11 +121,9 @@ pub async fn create_board_post(
 
 pub async fn delete_board_post(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AgentId(actor_id): AgentId,
     Path(post_id): Path<String>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let actor_id = parse_actor_id(&headers)?;
-
     let mut tx = state.pool().begin().await?;
     let (location_id, mut board_state) = load_board_state_for_update(&mut tx).await?;
 
@@ -134,10 +158,8 @@ pub async fn delete_board_post(
 
 pub async fn clear_board(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AgentId(actor_id): AgentId,
 ) -> AppResult<Json<serde_json::Value>> {
-    let actor_id = parse_actor_id(&headers)?;
-
     let mut tx = state.pool().begin().await?;
     let (location_id, mut board_state) = load_board_state_for_update(&mut tx).await?;
     let removed_count = board_state.posts.len();
@@ -165,24 +187,6 @@ pub async fn clear_board(
     Ok(Json(
         serde_json::json!({"cleared": true, "removed_count": removed_count}),
     ))
-}
-
-fn parse_actor_id(headers: &HeaderMap) -> AppResult<String> {
-    let actor_id = headers
-        .get("x-agent-id")
-        .ok_or_else(|| AppError::BadRequest("missing x-agent-id header".to_string()))?
-        .to_str()
-        .map_err(|_| AppError::BadRequest("invalid x-agent-id header".to_string()))?
-        .trim()
-        .to_string();
-
-    if actor_id.is_empty() {
-        return Err(AppError::BadRequest(
-            "x-agent-id header cannot be empty".to_string(),
-        ));
-    }
-
-    Ok(actor_id)
 }
 
 async fn load_board_state(
