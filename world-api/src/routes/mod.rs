@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod board;
+pub mod economy;
 pub mod events;
 pub mod inventory;
 pub mod locations;
