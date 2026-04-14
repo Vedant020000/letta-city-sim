@@ -25,6 +25,8 @@ node .\lcity\bin\lcity.mjs health_check
 - `pathfind --from --to`
 - `world_time`
 - `list_inventory`
+- `use_item --item-id <id> --quantity <n>` — consume stackable items, adjusts vitals
+- `economy_update --amount-cents <n> [--reason "<text>"]` — credit (positive) or debit (negative) agent balance
 - `board_read`, `board_posts`, `board_post --text`, `board_delete --post-id`, `board_clear`
 - `lettabot_notify --message "<text>" [--agent-id <id>]`
 
@@ -95,6 +97,20 @@ const COMMANDS = {
 - **handler(ctx, options)** – optional fully custom handler for advanced flows (`move_to_agent`, `daemon`, `lettabot_notify` use this).
 
 The `run()` function now just looks up the command in the registry and passes the parsed CLI flags to the shared executor. To add a new command (e.g., `go_to_job` or `cook`), define a registry entry and update the usage list at the top of the README.
+
+## Stackable consumables
+
+Inventory items now support `quantity`, `consumable_type`, and `vital_value` fields. When an agent uses a consumable:
+
+- `use_item --item-id apple --quantity 1` decrements quantity and adjusts vitals
+- If `consumable_type` is `food`, `water`, `stamina`, or `sleep`, the agent's corresponding vital is increased (clamped at 100)
+- When quantity hits 0, the item row is deleted
+
+Example:
+
+```powershell
+lcity use_item --item-id water_bottle --quantity 1
+```
 
 ## Notify LettaBot from the CLI
 

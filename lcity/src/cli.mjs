@@ -326,6 +326,23 @@ const COMMANDS = {
     method: "DELETE",
     requiresAgent: true,
   },
+  use_item: {
+    route: "/agents/use-item",
+    method: "POST",
+    requiresAgent: true,
+    buildBody: (options) => ({
+      item_id: required(options, "item-id"),
+      quantity: parseInt(required(options, "quantity"), 10),
+    }),
+  },
+  economy_update: {
+    route: (ctx) => `/agents/${encodeURIComponent(resolveAgentId(ctx.agentIdFile))}/economy`,
+    method: "PATCH",
+    buildBody: (options) => ({
+      amount_cents: parseInt(required(options, "amount-cents"), 10),
+      reason: options["reason"],
+    }),
+  },
 };
 
 async function executeDeclarativeCommand(ctx, def, options) {

@@ -8,4 +8,7 @@ pub struct InventoryItem {
     pub held_by: Option<String>,
     pub location_id: Option<String>,
     pub state: serde_json::Value,
+    pub quantity: i16,
+    pub consumable_type: Option<String>,
+    pub vital_value: Option<i16>,
 }

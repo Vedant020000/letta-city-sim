@@ -26,10 +26,12 @@ use routes::agents::{
 use routes::board::{
     clear_board, create_board_post, delete_board_post, get_board_posts, get_public_board,
 };
+use routes::economy::update_economy;
 use routes::events::{create_event, list_events};
 use routes::inventory::transfer_item_between_agents;
 use routes::inventory::{
     add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory,
+    use_item,
 };
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::objects::{list_objects_by_location, update_object_state};
@@ -79,6 +81,8 @@ async fn main() -> AppResult<()> {
         .route("/agents/:id/location", patch(update_agent_location))
         .route("/agents/:id/activity", patch(update_agent_activity))
         .route("/agents/:id/activity", delete(clear_agent_activity))
+        .route("/agents/use-item", post(use_item))
+        .route("/agents/:id/economy", patch(update_economy))
         .route("/inventory/:id", get(get_agent_inventory))
         .route("/inventory/:id/add", patch(add_item_to_agent_inventory))
         .route(
