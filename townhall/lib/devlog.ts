@@ -13,6 +13,20 @@ export type DevLogEntry = {
 
 export const devLogEntries: DevLogEntry[] = [
   {
+    id: "2026-04-29-bundled-docker",
+    date: "2026-04-29",
+    category: "infrastructure",
+    title: "Optional bundled Docker image landed",
+    summary:
+      "There is now an optional single-image deployment/demo path that packages the frontend and world-api together while still keeping Postgres separate.",
+    bullets: [
+      "Added a bundled Dockerfile and compose path",
+      "Kept the normal local workflow unchanged",
+      "Made the frontend proxy /api and /ws/events internally in bundled mode",
+      "Documented the one-port deployment path for demos and distribution",
+    ],
+  },
+  {
     id: "2026-04-29-sleep-interaction",
     date: "2026-04-29",
     category: "backend",

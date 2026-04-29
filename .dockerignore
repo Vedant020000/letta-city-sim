@@ -1,0 +1,16 @@
+.git
+.github
+.letta
+
+frontend/node_modules
+frontend/.next
+frontend/out
+
+townhall/node_modules
+townhall/.next
+townhall/out
+
+world-api/target
+
+node_modules
+**/.DS_Store

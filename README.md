@@ -49,6 +49,44 @@ cargo run
 
 > Keep `.env` synced with `.env.example`. Never commit real secrets.
 
+## Optional bundled Docker image
+
+There is now an optional bundled deployment/demo path that packages:
+
+- `world-api`
+- `frontend`
+
+into a single image with **one public frontend port**. The frontend proxies API and websocket traffic internally to the bundled world-api.
+
+This is meant for demos/deployment convenience, not as the preferred local workflow on Vedant's machine.
+
+### Build the bundled image
+
+```powershell
+docker build -f Dockerfile.bundle -t letta-city-sim-bundled .
+```
+
+### Run against an existing Postgres database
+
+```powershell
+docker run --rm -p 3000:3000 ^
+  -e DATABASE_URL="postgres://sim:sim_dev_password@host.docker.internal:5432/letta_city_sim" ^
+  -e SIM_API_KEY="dev_key_change_me" ^
+  letta-city-sim-bundled
+```
+
+This expects the target database to already have the current migrations and seed data applied.
+
+### Demo compose path
+
+For a one-command demo stack with a separate Postgres service, use:
+
+```powershell
+docker compose -f docker-compose.bundle.yml up --build
+```
+
+That compose file initializes Postgres with the current migrations + seed SQL and serves the bundled app on `http://localhost:3000`.
+
 ## Quick endpoint smoke tests
 
 ```powershell

@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: letta_city_sim
+      POSTGRES_USER: sim
+      POSTGRES_PASSWORD: sim_dev_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sim"]
+      interval: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_bundle:/var/lib/postgresql/data
+      - ./world-api/migrations/0001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./world-api/migrations/0002_agent_economy_vitals.sql:/docker-entrypoint-initdb.d/002_agent_economy_vitals.sql:ro
+      - ./world-api/migrations/0003_inventory_quantity.sql:/docker-entrypoint-initdb.d/003_inventory_quantity.sql:ro
+      - ./seed/locations.sql:/docker-entrypoint-initdb.d/101_locations.sql:ro
+      - ./seed/adjacency.sql:/docker-entrypoint-initdb.d/102_adjacency.sql:ro
+      - ./seed/objects.sql:/docker-entrypoint-initdb.d/103_objects.sql:ro
+      - ./seed/agents.sql:/docker-entrypoint-initdb.d/104_agents.sql:ro
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.bundle
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://sim:sim_dev_password@db:5432/letta_city_sim
+      SIM_API_KEY: dev_key_change_me
+      PORT: 3000
+      WORLD_API_PORT: 3001
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata_bundle:
