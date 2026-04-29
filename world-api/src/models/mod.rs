@@ -3,6 +3,7 @@ pub mod board;
 pub mod common;
 pub mod event;
 pub mod inventory;
+pub mod intention;
 pub mod location;
 pub mod object;
 pub mod pathfind;

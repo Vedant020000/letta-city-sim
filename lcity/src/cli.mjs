@@ -350,6 +350,49 @@ async function notifyDaemon(ctx, { message, agentId }) {
   }
 }
 
+function buildIntentionBody(options, { status } = {}) {
+  const body = {};
+  if (options.summary) body.summary = String(options.summary);
+  if (options.reason) body.reason = String(options.reason);
+  if (options["expected-location-id"]) {
+    body.expected_location_id = String(options["expected-location-id"]);
+  }
+  if (options["expected-action"]) body.expected_action = String(options["expected-action"]);
+  if (options.outcome) body.outcome = String(options.outcome);
+  if (status) body.status = status;
+  return body;
+}
+
+async function currentIntentionId(ctx) {
+  const agentId = resolveAgentId(ctx.agentIdFile);
+  const response = await requestJson(
+    `${ctx.apiBase.replace(/\/$/, "")}/agents/${encodeURIComponent(agentId)}/intentions/current`,
+    { headers: { "x-sim-key": resolveSimKey(ctx.simKey) } },
+  );
+  if (!okStatus(response.statusCode)) {
+    throw new Error(`failed to load current intention: ${JSON.stringify(response.data)}`);
+  }
+  const intention = response.data && Object.prototype.hasOwnProperty.call(response.data, "data")
+    ? response.data.data
+    : response.data;
+  if (!intention || !intention.id) {
+    throw new Error("agent has no active intention");
+  }
+  return intention.id;
+}
+
+async function updateIntentionStatus(ctx, options, status) {
+  const agentId = resolveAgentId(ctx.agentIdFile);
+  const intentionId = options["intention-id"]
+    ? String(options["intention-id"]).trim()
+    : await currentIntentionId(ctx);
+
+  return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions/${encodeURIComponent(intentionId)}`, {
+    method: "PATCH",
+    body: buildIntentionBody(options, { status }),
+  });
+}
+
 const COMMANDS = {
   health_check: {
     route: "/agents/health",
@@ -523,6 +566,13 @@ function usage() {
     "lcity board_post --text \"Town hall at 6 PM\"",
     "lcity board_delete --post-id <id>",
     "lcity board_clear",
+    "lcity current_intention",
+    "lcity list_intentions",
+    "lcity set_intention --summary \"Find sheet music\" --reason \"I want something new to practice\"",
+    "lcity update_intention --intention-id <id> --summary \"...\"",
+    "lcity complete_intention [--intention-id <id>] --outcome \"Found a lead\"",
+    "lcity fail_intention [--intention-id <id>] --outcome \"Archive was closed\"",
+    "lcity abandon_intention [--intention-id <id>] --outcome \"Changed plans\"",
     "lcity lettabot_notify --message \"Wrap up\"",
     "lcity daemon --start",
     "lcity daemon --stop",
@@ -955,6 +1005,42 @@ export async function run(argv) {
         });
       case "board_clear":
         return callApi(ctx, "/board/clear", { method: "DELETE", requiresAgent: true });
+      case "current_intention": {
+        const agentId = resolveAgentId(ctx.agentIdFile);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions/current`);
+      }
+      case "list_intentions": {
+        const agentId = resolveAgentId(ctx.agentIdFile);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions`);
+      }
+      case "set_intention": {
+        const agentId = resolveAgentId(ctx.agentIdFile);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions`, {
+          method: "POST",
+          body: {
+            ...buildIntentionBody(options),
+            summary: required(options, "summary"),
+            reason: required(options, "reason"),
+          },
+        });
+      }
+      case "update_intention": {
+        const agentId = resolveAgentId(ctx.agentIdFile);
+        const intentionId = required(options, "intention-id");
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions/${encodeURIComponent(intentionId)}`, {
+          method: "PATCH",
+          body: buildIntentionBody(options),
+        });
+      }
+      case "complete_intention":
+        required(options, "outcome");
+        return updateIntentionStatus(ctx, options, "completed");
+      case "fail_intention":
+        required(options, "outcome");
+        return updateIntentionStatus(ctx, options, "failed");
+      case "abandon_intention":
+        required(options, "outcome");
+        return updateIntentionStatus(ctx, options, "abandoned");
       case "lettabot_notify": {
         const message = required(options, "message");
         const agentOverride = options["agent-id"] ? String(options["agent-id"]).trim() : undefined;

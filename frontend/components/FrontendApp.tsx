@@ -15,6 +15,7 @@ function formatWorldTime(value: string | null) {
 export function FrontendApp() {
   const [state, dispatch] = useReducer(simReducer, initialSimState);
   const refreshTimerRef = useRef<number | null>(null);
+  const intentionsByAgent = new Map(state.currentIntentions.map((intention) => [intention.agent_id, intention]));
 
   const loadSnapshot = useCallback(async (mode: "bootstrap" | "refresh") => {
     try {
@@ -125,6 +126,12 @@ export function FrontendApp() {
                       <small>
                         {agent.occupation} · {agent.current_location_id}
                       </small>
+                      {intentionsByAgent.get(agent.id) ? (
+                        <small className="agent-intention">
+                          Intends: {intentionsByAgent.get(agent.id)?.summary}
+                          <span>{intentionsByAgent.get(agent.id)?.reason}</span>
+                        </small>
+                      ) : null}
                     </div>
                     <small>{agent.current_activity || agent.state}</small>
                   </div>

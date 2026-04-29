@@ -30,6 +30,10 @@ use routes::board::{
 use routes::economy::update_economy;
 use routes::events::{create_event, list_events};
 use routes::inventory::transfer_item_between_agents;
+use routes::intentions::{
+    create_agent_intention, get_current_agent_intention, list_agent_intentions,
+    list_current_intentions, update_agent_intention,
+};
 use routes::inventory::{
     add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory,
     use_item,
@@ -68,6 +72,7 @@ async fn main() -> AppResult<()> {
         .route("/board/clear", delete(clear_board))
         .route("/events", get(list_events))
         .route("/events", post(create_event))
+        .route("/intentions/current", get(list_current_intentions))
         .route("/ws/events", get(ws_events))
         .route("/locations", get(list_locations))
         .route("/world/time", get(get_world_time))
@@ -80,6 +85,10 @@ async fn main() -> AppResult<()> {
         .route("/agents/health", get(agent_health_check))
         .route("/agents/move", patch(move_agent_with_header))
         .route("/agents/:id", get(get_agent_by_id))
+        .route("/agents/:id/intentions", get(list_agent_intentions))
+        .route("/agents/:id/intentions", post(create_agent_intention))
+        .route("/agents/:id/intentions/current", get(get_current_agent_intention))
+        .route("/agents/:id/intentions/:intention_id", patch(update_agent_intention))
         .route("/agents/:id/location", patch(update_agent_location))
         .route("/agents/:id/activity", patch(update_agent_activity))
         .route("/agents/:id/activity", delete(clear_agent_activity))

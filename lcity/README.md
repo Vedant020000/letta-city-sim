@@ -30,6 +30,12 @@ node .\lcity\bin\lcity.mjs health_check
 - `use_item --item-id <id> --quantity <n>` — consume stackable items, adjusts vitals
 - `economy_update --amount-cents <n> [--reason "<text>"]` — credit (positive) or debit (negative) agent balance
 - `board_read`, `board_posts`, `board_post --text`, `board_delete --post-id`, `board_clear`
+- `current_intention`, `list_intentions`
+- `set_intention --summary <text> --reason <text> [--expected-location-id <id>] [--expected-action <text>]`
+- `update_intention --intention-id <id> [--summary <text>] [--reason <text>] [--expected-location-id <id>] [--expected-action <text>]`
+- `complete_intention [--intention-id <id>] --outcome <text>`
+- `fail_intention [--intention-id <id>] --outcome <text>`
+- `abandon_intention [--intention-id <id>] --outcome <text>`
 - `lettabot_notify --message "<text>" [--agent-id <id>]`
 
 ## Use `.lcity/agent_id`
@@ -72,6 +78,19 @@ Output is always JSON:
 ```
 
 All commands are designed for tool-calling and return machine-readable JSON.
+
+## Intention workflow
+
+Agents should use intentions for meaningful multi-step action sequences:
+
+```powershell
+lcity current_intention
+lcity set_intention --summary "Find old jazz sheet music" --reason "I want something new to practice tonight" --expected-location-id oak_classroom_a --expected-action research_archive
+lcity move_to --location-id oak_classroom_a
+lcity complete_intention --outcome "Found a promising lead in Klaus's old course packet."
+```
+
+`complete_intention`, `fail_intention`, and `abandon_intention` use the current active intention when `--intention-id` is omitted.
 
 ## Adding new commands
 
