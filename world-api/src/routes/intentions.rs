@@ -136,10 +136,21 @@ pub async fn create_agent_intention(
     .fetch_one(&mut *tx)
     .await?;
 
-    insert_intention_event(&mut tx, "agent.intention.started", &intention, &current_location_id).await?;
+    insert_intention_event(
+        &mut tx,
+        "agent.intention.started",
+        &intention,
+        &current_location_id,
+    )
+    .await?;
     tx.commit().await?;
 
-    broadcast_intention_event(&state, "agent.intention.started", &intention, current_location_id);
+    broadcast_intention_event(
+        &state,
+        "agent.intention.started",
+        &intention,
+        current_location_id,
+    );
 
     Ok(Json(ApiResponse::from(intention)))
 }
@@ -180,7 +191,9 @@ pub async fn update_agent_intention(
         None => existing.status,
     };
     let expected_action = payload.expected_action.or(existing.expected_action);
-    let expected_location_id = payload.expected_location_id.or(existing.expected_location_id);
+    let expected_location_id = payload
+        .expected_location_id
+        .or(existing.expected_location_id);
     let outcome = payload.outcome.or(existing.outcome);
     let metadata = payload.metadata.unwrap_or(existing.metadata);
     let completed_at_expr = if status == ACTIVE_STATUS {
@@ -239,7 +252,11 @@ fn required_text(value: String, field: &str) -> AppResult<String> {
 fn optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|v| {
         let trimmed = v.trim().to_string();
-        if trimmed.is_empty() { None } else { Some(trimmed) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
     })
 }
 
@@ -247,7 +264,9 @@ fn normalize_status(value: String) -> AppResult<String> {
     let status = value.trim().to_lowercase();
     match status.as_str() {
         "active" | "completed" | "failed" | "abandoned" => Ok(status),
-        _ => Err(AppError::BadRequest(format!("invalid intention status: {value}"))),
+        _ => Err(AppError::BadRequest(format!(
+            "invalid intention status: {value}"
+        ))),
     }
 }
 
@@ -310,7 +329,10 @@ async fn insert_intention_event(
     .bind(event_type)
     .bind(&intention.agent_id)
     .bind(location_id)
-    .bind(format!("Agent {} intention: {}", intention.agent_id, intention.summary))
+    .bind(format!(
+        "Agent {} intention: {}",
+        intention.agent_id, intention.summary
+    ))
     .bind(intention_event_payload(intention).to_string())
     .bind(Utc::now())
     .execute(&mut **tx)
