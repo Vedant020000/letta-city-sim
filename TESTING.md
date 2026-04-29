@@ -68,16 +68,16 @@ curl.exe http://localhost:3001/agents/eddy_lin
 curl.exe -X PATCH http://localhost:3001/agents/move ^
   -H "Content-Type: application/json" ^
   -H "x-agent-id: eddy_lin" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"location_id\":\"lin_kitchen\"}"
 
 curl.exe -X PATCH http://localhost:3001/agents/eddy_lin/activity ^
   -H "Content-Type: application/json" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"activity\":\"Cooking lunch\"}"
 
 curl.exe -X DELETE http://localhost:3001/agents/eddy_lin/activity ^
-  -H "x-sim-api-key: $env:SIM_API_KEY"
+  -H "x-sim-key: $env:SIM_API_KEY"
 ```
 
 Expect:
@@ -93,17 +93,17 @@ curl.exe http://localhost:3001/inventory/eddy_lin
 
 curl.exe -X PATCH http://localhost:3001/inventory/eddy_lin/add ^
   -H "Content-Type: application/json" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"item_id\":\"sheet_music_001\"}"
 
 curl.exe -X PATCH http://localhost:3001/inventory/eddy_lin/remove ^
   -H "Content-Type: application/json" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"item_id\":\"sheet_music_001\"}"
 
 curl.exe -X PATCH http://localhost:3001/agents/eddy_lin/inventory/transfer ^
   -H "Content-Type: application/json" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"to_agent_id\":\"abigail_chen\",\"item_id\":\"sheet_music_001\"}"
 ```
 
@@ -130,7 +130,7 @@ Ensure an inventory row has:
 curl.exe -X POST http://localhost:3001/agents/use-item ^
   -H "Content-Type: application/json" ^
   -H "x-agent-id: eddy_lin" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"item_id\":\"apple_001\",\"quantity\":1}"
 ```
 
@@ -155,7 +155,7 @@ Expect:
 curl.exe -X PATCH http://localhost:3001/agents/eddy_lin/economy ^
   -H "Content-Type: application/json" ^
   -H "x-agent-id: eddy_lin" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"amount_cents\":250,\"reason\":\"Quest reward\"}"
 ```
 
@@ -175,7 +175,7 @@ curl.exe http://localhost:3001/board/posts
 curl.exe -X PATCH http://localhost:3001/board/posts ^
   -H "Content-Type: application/json" ^
   -H "x-agent-id: maria_lopez" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"text\":\"Town hall at 6 PM\"}"
 
 curl.exe http://localhost:3001/locations/lin_kitchen/objects
@@ -183,7 +183,7 @@ curl.exe http://localhost:3001/locations/lin_kitchen/objects
 curl.exe -X PATCH http://localhost:3001/objects/stove_lin_kitchen ^
   -H "Content-Type: application/json" ^
   -H "x-agent-id: eddy_lin" ^
-  -H "x-sim-api-key: $env:SIM_API_KEY" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
   -d "{\"state\":{\"on\":true}}"
 
 curl.exe "http://localhost:3001/events?limit=20"

@@ -64,6 +64,7 @@ export function simReducer(state: SimState, action: SimAction): SimState {
         agents: action.payload.agents,
         locations: action.payload.locations,
         worldTime: action.payload.worldTime,
+        recentEvents: action.payload.recentEvents,
         loading: false,
         error: null,
         lastSnapshotAt: new Date().toISOString(),

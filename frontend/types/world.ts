@@ -57,10 +57,21 @@ export type WorldEventEnvelope = {
   payload: Record<string, unknown>;
 };
 
+export type SimEvent = {
+  id: number;
+  occurred_at: string;
+  type: string;
+  actor_id: string | null;
+  location_id: string | null;
+  description: string;
+  metadata: Record<string, unknown>;
+};
+
 export type BootstrapSnapshot = {
   agents: Agent[];
   locations: Location[];
   worldTime: WorldTime;
+  recentEvents: WorldEventEnvelope[];
 };
 
 export type SimConnectionState = "idle" | "loading" | "open" | "closed" | "error";
