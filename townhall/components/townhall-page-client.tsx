@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BoardClient } from "@/components/board-client";
+import { TownhallShell } from "@/components/townhall-shell";
 import { getBoardIssues } from "@/lib/issues";
 import { BoardIssue } from "@/lib/types";
 
@@ -52,35 +54,7 @@ export function TownhallPageClient({ repoSlug }: Props) {
   }, [issues]);
 
   return (
-    <main className="page">
-      <div className="pixel-cloud pixel-cloud-left" aria-hidden />
-      <div className="pixel-cloud pixel-cloud-right" aria-hidden />
-
-      <div className="shell">
-        <header className="topbar">
-          <div className="brand">
-            <span className="brand-mark" aria-hidden />
-            <span>
-              <div className="brand-name">townhall</div>
-              <div className="brand-sub">name not decided city community board</div>
-            </span>
-          </div>
-
-          <div className="topbar-actions">
-            <a className="ghost-link" href={`https://github.com/${repoSlug}`} target="_blank" rel="noreferrer">
-              repo
-            </a>
-            <a
-              className="ghost-link"
-              href={`https://github.com/${repoSlug}/issues/new/choose`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              propose task
-            </a>
-          </div>
-        </header>
-
+    <TownhallShell repoSlug={repoSlug} currentPage="board">
         <section className="hero">
           <div className="hero-eyebrow">town notice board</div>
 
@@ -106,6 +80,9 @@ export function TownhallPageClient({ repoSlug }: Props) {
                 <a className="btn btn-primary" href="#board">
                   browse tasks
                 </a>
+                <Link className="btn btn-ghost" href="/status">
+                  project status
+                </Link>
                 <a
                   className="btn btn-ghost"
                   href={`https://github.com/${repoSlug}/blob/main/docs/community-contributions.md`}
@@ -170,11 +147,6 @@ export function TownhallPageClient({ repoSlug }: Props) {
         <section id="board">
           <BoardClient issues={issues} repoSlug={repoSlug} loading={loading} />
         </section>
-
-        <footer className="footer">
-          built for the letta community - <a href={`https://github.com/${repoSlug}`}>{repoSlug}</a>
-        </footer>
-      </div>
-    </main>
+    </TownhallShell>
   );
 }

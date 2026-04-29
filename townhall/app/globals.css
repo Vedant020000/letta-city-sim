@@ -198,6 +198,15 @@ code {
   flex-wrap: wrap;
 }
 
+.topbar-actions-primary,
+.internal-nav,
+.external-nav {
+  display: inline-flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .ghost-link {
   background: #ffe1cf;
   color: var(--ink);
@@ -206,6 +215,10 @@ code {
   font-size: 1.1rem;
   text-transform: uppercase;
   box-shadow: 3px 3px 0 0 var(--button-dark);
+}
+
+.ghost-link.active {
+  background: #ffe499;
 }
 
 .ghost-link:hover {
@@ -402,6 +415,106 @@ code {
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 20px;
   align-items: start;
+}
+
+.paper-section,
+.status-card,
+.roadmap-card {
+  border: 4px solid var(--border);
+  box-shadow: 6px 6px 0 0 var(--shadow);
+  background: var(--paper);
+}
+
+.status-hero {
+  gap: 16px;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.status-card {
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.status-card-label {
+  font-family: var(--font-body), monospace;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  color: var(--brick-dark);
+}
+
+.status-card-value {
+  margin: 0;
+  font-family: var(--font-body), monospace;
+  font-size: 1.5rem;
+  line-height: 1.05;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.status-card-copy,
+.status-body-copy {
+  margin: 0;
+  font-size: 1.3rem;
+  line-height: 1.15;
+  color: var(--ink-soft);
+}
+
+.status-section {
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.status-list {
+  margin: 0;
+  padding-left: 24px;
+  display: grid;
+  gap: 10px;
+  font-size: 1.28rem;
+  line-height: 1.12;
+  color: var(--ink-soft);
+}
+
+.status-list.compact {
+  gap: 8px;
+  font-size: 1.2rem;
+}
+
+.roadmap-grid,
+.split-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.split-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.roadmap-card {
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.roadmap-card h3 {
+  margin: 0;
+  font-family: var(--font-display), monospace;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.devlog-placeholder {
+  background:
+    linear-gradient(to bottom, #ffe39d 0 14px, transparent 14px 100%),
+    var(--paper);
 }
 
 .sidebar {
@@ -624,7 +737,10 @@ code {
   }
 
   .hero-row,
-  .board-grid {
+  .board-grid,
+  .status-grid,
+  .roadmap-grid,
+  .split-grid {
     grid-template-columns: 1fr;
   }
 
