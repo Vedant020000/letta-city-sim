@@ -127,6 +127,19 @@ curl.exe -X PATCH http://localhost:3001/board/posts ^
 
 Read-only endpoints continue to work without headers.
 
+## Letta Code skill
+
+This repo includes a Letta Code skill at `skills/living-in-letta-city/` for controlling NPCs through the existing `lcity` CLI. Use it when an agent should act inside the city instead of calling the World API by hand.
+
+Example:
+
+```powershell
+$env:SIM_API_KEY="dev_key_change_me"
+$env:LCITY_API_BASE="http://localhost:3001"
+node .\skills\living-in-letta-city\scripts\lcity-agent.mjs --agent-id eddy_lin health_check
+node .\skills\living-in-letta-city\scripts\lcity-agent.mjs --agent-id eddy_lin move_to --location-id hobbs_cafe_seating
+```
+
 ## Documentation
 - Contribution workflow: `CONTRIBUTING.md`
 - Canonical product brief: `docs/letta-city-sim-prd.md`
