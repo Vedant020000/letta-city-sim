@@ -25,36 +25,124 @@ async function postLettaBotCompletion({ lettabotBase, lettabotKey, agentId, mess
   });
 }
 
-async function wakeAgentViaLettaBot({ lettabotBase, lettabotKey, agentId, envelope }) {
-  // NOTE: Vedant confirmed LettaBot /v1/chat/completions is a persistent agent call.
-  // We keep payload minimal and deterministic; tools/agent logic should interpret the event.
-  const messages = [
-    {
-      role: "user",
-      content: JSON.stringify({
-        kind: "world_event",
-        event: envelope,
-      }),
-    },
-  ];
-
-  return postLettaBotCompletion({ lettabotBase, lettabotKey, agentId, messages });
-}
-
-async function sendLettaBotMessage({ lettabotBase, lettabotKey, agentId, message }) {
-  const trimmed = String(message || "").trim();
-  if (!trimmed) {
-    throw new Error("message cannot be empty");
+function normalizeInterrupt(interrupt) {
+  if (!interrupt || typeof interrupt !== "object") {
+    throw new Error("interrupt must be an object");
   }
 
-  const messages = [
-    {
-      role: "user",
-      content: trimmed,
-    },
-  ];
+  const agentId = String(interrupt.agentId || "").trim();
+  if (!agentId) {
+    throw new Error("interrupt missing agentId");
+  }
 
-  return postLettaBotCompletion({ lettabotBase, lettabotKey, agentId, messages });
+  const kind = String(interrupt.kind || "world_event").trim();
+  const cause = String(interrupt.cause || kind).trim();
+  const source = String(interrupt.source || "system").trim();
+  const transport = String(interrupt.transport || "lettabot_completion").trim();
+  const message = interrupt.message == null ? null : String(interrupt.message).trim();
+
+  if (kind === "manual_message" && !message) {
+    throw new Error("manual_message interrupt requires message");
+  }
+
+  return {
+    ...interrupt,
+    agentId,
+    kind,
+    cause,
+    source,
+    transport,
+    message,
+    payload: interrupt.payload && typeof interrupt.payload === "object" ? interrupt.payload : null,
+  };
+}
+
+function createWorldEventInterrupt({ agentId, envelope, transport = "lettabot_completion" }) {
+  const eventType = typeof envelope?.type === "string" && envelope.type.trim()
+    ? envelope.type.trim()
+    : typeof envelope?.event_type === "string" && envelope.event_type.trim()
+      ? envelope.event_type.trim()
+      : "world_event";
+
+  return normalizeInterrupt({
+    agentId,
+    kind: "world_event",
+    cause: eventType,
+    source: "world_api",
+    payload: envelope,
+    transport,
+  });
+}
+
+function createManualInterrupt({ agentId, message, transport = "lettabot_completion" }) {
+  return normalizeInterrupt({
+    agentId,
+    kind: "manual_message",
+    cause: "manual_message",
+    source: "cli",
+    message,
+    transport,
+  });
+}
+
+async function interruptViaLettaBotCompletion({ lettabotBase, lettabotKey, interrupt }) {
+  // NOTE: Vedant confirmed LettaBot /v1/chat/completions is a persistent agent call.
+  // All wake/interrupt mechanisms normalize into one interrupt object before transport.
+  const messages = interrupt.kind === "manual_message"
+    ? [
+      {
+        role: "user",
+        content: interrupt.message,
+      },
+    ]
+    : [
+      {
+        role: "user",
+        content: JSON.stringify({
+          kind: interrupt.kind,
+          cause: interrupt.cause,
+          source: interrupt.source,
+          event: interrupt.payload,
+        }),
+      },
+    ];
+
+  return postLettaBotCompletion({
+    lettabotBase,
+    lettabotKey,
+    agentId: interrupt.agentId,
+    messages,
+  });
+}
+
+const INTERRUPT_TRANSPORTS = {
+  lettabot_completion: interruptViaLettaBotCompletion,
+  sdk: async () => {
+    throw new Error("interrupt transport 'sdk' is not implemented yet");
+  },
+  webhook: async () => {
+    throw new Error("interrupt transport 'webhook' is not implemented yet");
+  },
+};
+
+async function interruptAgent({ lettabotBase, lettabotKey, interrupt }) {
+  const normalized = normalizeInterrupt(interrupt);
+  const adapter = INTERRUPT_TRANSPORTS[normalized.transport];
+  if (!adapter) {
+    throw new Error(`unknown interrupt transport: ${normalized.transport}`);
+  }
+
+  const response = await adapter({
+    lettabotBase,
+    lettabotKey,
+    interrupt: normalized,
+  });
+
+  return {
+    response,
+    interrupt: normalized,
+    transport: normalized.transport,
+  };
 }
 
 function parseCli(argv) {
@@ -229,8 +317,10 @@ async function notifyDaemon(ctx, { message, agentId }) {
 
   const url = `http://127.0.0.1:${ctx.daemonPort}/notify`;
   const payload = {
-    message: trimmedMessage,
-    agent_id: resolvedAgentId,
+    interrupt: createManualInterrupt({
+      agentId: resolvedAgentId,
+      message: trimmedMessage,
+    }),
   };
 
   try {
@@ -640,24 +730,31 @@ async function daemonRun(ctx, options) {
           return;
         }
 
-        const message = typeof payload.message === "string" ? payload.message.trim() : "";
-        if (!message) {
-          sendJson(res, 400, { ok: false, error: "missing message" });
-          return;
+        let interrupt;
+        if (payload.interrupt && typeof payload.interrupt === "object") {
+          interrupt = normalizeInterrupt(payload.interrupt);
+        } else {
+          const message = typeof payload.message === "string" ? payload.message.trim() : "";
+          if (!message) {
+            sendJson(res, 400, { ok: false, error: "missing message" });
+            return;
+          }
+
+          const agentId = typeof payload.agent_id === "string" ? payload.agent_id.trim() : "";
+          if (!agentId) {
+            sendJson(res, 400, { ok: false, error: "missing agent_id" });
+            return;
+          }
+
+          interrupt = createManualInterrupt({ agentId, message });
         }
 
-        const agentId = typeof payload.agent_id === "string" ? payload.agent_id.trim() : "";
-        if (!agentId) {
-          sendJson(res, 400, { ok: false, error: "missing agent_id" });
-          return;
-        }
-
-        const lettabotResp = await sendLettaBotMessage({
+        const result = await interruptAgent({
           lettabotBase,
           lettabotKey,
-          agentId,
-          message,
+          interrupt,
         });
+        const { response: lettabotResp } = result;
 
         if (!lettabotResp.ok) {
           const errorText = await lettabotResp.text();
@@ -668,8 +765,15 @@ async function daemonRun(ctx, options) {
           return;
         }
 
-        appendLog(ctx, `notify agent=${agentId} len=${message.length} status=${lettabotResp.status}`);
-        sendJson(res, 200, { ok: true });
+        appendLog(
+          ctx,
+          `interrupt agent=${interrupt.agentId} cause=${interrupt.cause} transport=${result.transport} status=${lettabotResp.status}`,
+        );
+        sendJson(res, 200, {
+          ok: true,
+          transport: result.transport,
+          cause: interrupt.cause,
+        });
       } catch (err) {
         appendLog(ctx, `notify error=${err.message}`);
         sendJson(res, 500, { ok: false, error: err.message });
@@ -713,15 +817,15 @@ async function daemonRun(ctx, options) {
           if (targets.length === 0) return;
 
           for (const agentId of targets) {
-            const resp = await wakeAgentViaLettaBot({
+            const result = await interruptAgent({
               lettabotBase,
               lettabotKey,
-              agentId,
-              envelope,
+              interrupt: createWorldEventInterrupt({ agentId, envelope }),
             });
+            const { response: resp, interrupt } = result;
             appendLog(
               ctx,
-              `wake agent=${agentId} event=${envelope.type || envelope.event_type} status=${resp.status}`,
+              `interrupt agent=${interrupt.agentId} cause=${interrupt.cause} transport=${result.transport} status=${resp.status}`,
             );
           }
         } catch (err) {

@@ -7,6 +7,7 @@ use axum::{
     routing::{delete, get, patch, post},
 };
 use dotenvy::dotenv;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
@@ -92,6 +93,12 @@ async fn main() -> AppResult<()> {
         .route(
             "/agents/:id/inventory/transfer",
             patch(transfer_item_between_agents),
+        )
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
         )
         .layer(axum::middleware::from_fn(require_sim_key))
         .with_state(state);

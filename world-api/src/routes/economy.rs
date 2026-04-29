@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::State,
 };
 use chrono::Utc;
 use serde::Deserialize;

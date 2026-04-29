@@ -14,7 +14,7 @@ const HEADER_SIM_KEY: &str = "x-sim-key";
 const HEADER_AGENT_ID: &str = "x-agent-id";
 
 #[derive(Clone, Debug)]
-pub struct SimKey(String);
+pub struct SimKey(pub String);
 
 impl SimKey {
     pub fn as_str(&self) -> &str {
@@ -23,7 +23,7 @@ impl SimKey {
 }
 
 #[derive(Clone, Debug)]
-pub struct AgentId(String);
+pub struct AgentId(pub String);
 
 impl AgentId {
     pub fn into_inner(self) -> String {

@@ -1,6 +1,5 @@
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -8,7 +7,6 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,28 +40,9 @@ impl WorldEventEnvelope {
 
 pub async fn ws_events(
     State(state): State<AppState>,
-    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    if let Err(e) = authorize_ws(&headers) {
-        return (StatusCode::UNAUTHORIZED, e.to_string()).into_response();
-    }
-
     ws.on_upgrade(move |socket| handle_socket(state, socket))
-}
-
-fn authorize_ws(headers: &HeaderMap) -> AppResult<()> {
-    let expected = std::env::var("SIM_API_KEY")?;
-    let provided = headers
-        .get("x-sim-key")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim())
-        .unwrap_or("");
-
-    if provided.is_empty() || provided != expected {
-        return Err(AppError::Unauthorized);
-    }
-    Ok(())
 }
 
 async fn handle_socket(state: AppState, mut socket: WebSocket) {

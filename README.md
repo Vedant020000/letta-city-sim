@@ -4,6 +4,7 @@ Autonomous city simulation where each NPC is a Letta agent acting on its own clo
 
 - **world-api/** &mdash; Rust/Axum REST service exposing world state.
 - **frontend/** &mdash; Next.js 15 + Phaser 3 visualization.
+- **townhall/** &mdash; Next.js community contribution board powered by GitHub Issues.
 - **seed/** &mdash; JSON (or scripts) that populate Smallville.
 - **docs/** &mdash; Product brief, extensive TODO, and archived plans.
 - **scripts/** &mdash; Tooling helpers (migrations, bootstrap, etc.).
@@ -22,7 +23,8 @@ Implemented so far:
 - Objects API (`GET /objects/:location_id`, `PATCH /objects/:id`)
 - Events API (`GET /events`, `POST /events`)
 - World time API (`GET /world/time`)
-- Manual QA checklist in `test.md`
+- Canonical QA checklist in `TESTING.md`
+- Community contribution board scaffold in `townhall/`
 
 Still pending: Letta SDK tool wiring, webhook bridge, conversations, websocket stream, and frontend map/UI.
 
@@ -57,7 +59,7 @@ curl.exe http://localhost:3001/board
 curl.exe http://localhost:3001/world/time
 ```
 
-For full manual validation, use `test.md`.
+For full manual validation, use `TESTING.md`.
 
 ## Authentication & CLI helper
 
@@ -88,6 +90,12 @@ curl.exe -X PATCH http://localhost:3001/board/posts ^
 Read-only endpoints continue to work without headers.
 
 ## Documentation
+- Contribution workflow: `CONTRIBUTING.md`
 - Canonical product brief: `docs/letta-city-sim-prd.md`
 - Full execution checklist: `docs/letta-city-sim-extensive-todo.md`
+- Community contribution breakdown: `docs/community-contributions.md`
+- Contributor guides index: `docs/guides/README.md`
+- Location guide: `docs/guides/adding-locations.md`
+- Items/consumables guide: `docs/guides/adding-items-and-consumables.md`
+- Playtesting guide: `docs/guides/playtesting.md`
 - Historical docs live under `docs/archive/`

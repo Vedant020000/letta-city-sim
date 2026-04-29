@@ -98,6 +98,35 @@ const COMMANDS = {
 
 The `run()` function now just looks up the command in the registry and passes the parsed CLI flags to the shared executor. To add a new command (e.g., `go_to_job` or `cook`), define a registry entry and update the usage list at the top of the README.
 
+## Interrupt abstraction
+
+The CLI now centralizes all wake/resume behavior behind a single internal function: `interruptAgent(...)`.
+
+That means both of these flows share the same interrupt pipeline:
+
+- daemon websocket events from the World API (`agent_targets` on `/ws/events`)
+- manual `lettabot_notify` calls through the local daemon `/notify` endpoint
+
+Each interrupt is normalized into a common shape with fields like:
+
+- `agentId`
+- `kind`
+- `cause`
+- `source`
+- `message` or `payload`
+- `transport`
+
+Currently implemented transport:
+
+- `lettabot_completion` — sends the interrupt to LettaBot via `/v1/chat/completions`
+
+Reserved extension points for future work:
+
+- `sdk`
+- `webhook`
+
+This keeps wake semantics in one place, so future adapters can be added without changing every daemon/manual call site.
+
 ## Stackable consumables
 
 Inventory items now support `quantity`, `consumable_type`, and `vital_value` fields. When an agent uses a consumable:
@@ -134,4 +163,4 @@ lcity lettabot_notify --message "Task finished"
 lcity lettabot_notify --message "Broadcast" --agent-id sam_moore
 ```
 
-Under the hood, the CLI posts to the local daemon (`/notify`), which reuses your `LETTABOT_API_KEY` + base URL to call `/v1/chat/completions`.
+Under the hood, the CLI posts to the local daemon (`/notify`), which converts the request into a normalized interrupt and dispatches it through `interruptAgent(...)`. The current transport adapter then uses your `LETTABOT_API_KEY` + base URL to call `/v1/chat/completions`.

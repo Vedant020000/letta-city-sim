@@ -215,7 +215,29 @@ Expect:
 
 ---
 
-## 9) Regression checklist
+## 9) Interrupt / wake pipeline
+
+Start the local daemon and verify both event-driven and manual interrupts pass through the same path.
+
+```powershell
+$env:SIM_API_KEY="devkey"
+$env:LETTABOT_API_KEY="user-api-key"
+lcity daemon --start
+
+# manual interrupt
+lcity lettabot_notify --message "Wake up and inspect the board"
+```
+
+Then inspect `.lcity/daemon.log`.
+
+Expect:
+- log lines use the unified `interrupt` wording
+- manual notify logs include `cause=manual_message`
+- websocket-driven wakes log `cause=<event_type>` and `transport=lettabot_completion`
+
+---
+
+## 10) Regression checklist
 
 - Unknown IDs => 404 where expected
 - Invalid payloads => 400 where expected

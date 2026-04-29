@@ -1,0 +1,136 @@
+import * as Phaser from "phaser";
+import { Agent, Location } from "@/types/world";
+
+type TownSceneSnapshot = {
+  agents: Agent[];
+  locations: Location[];
+};
+
+const CELL = 96;
+const PADDING_X = 140;
+const PADDING_Y = 110;
+
+function colorForAgent(agentId: string) {
+  const palette = [0x2563eb, 0xdc2626, 0x16a34a, 0x9333ea, 0xea580c, 0x0891b2];
+  let hash = 0;
+  for (const char of agentId) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return palette[hash % palette.length];
+}
+
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+export class TownScene extends Phaser.Scene {
+  private snapshot: TownSceneSnapshot = { agents: [], locations: [] };
+  private worldLayer!: Phaser.GameObjects.Container;
+
+  constructor() {
+    super("TownScene");
+  }
+
+  create() {
+    this.cameras.main.setBackgroundColor("#9fd3ff");
+    this.worldLayer = this.add.container(0, 0);
+    this.renderSnapshot();
+  }
+
+  applySnapshot(snapshot: TownSceneSnapshot) {
+    this.snapshot = snapshot;
+    if (this.scene.isActive()) {
+      this.renderSnapshot();
+    }
+  }
+
+  private renderSnapshot() {
+    if (!this.worldLayer) return;
+    this.worldLayer.removeAll(true);
+
+    const { locations, agents } = this.snapshot;
+    if (locations.length === 0) {
+      return;
+    }
+
+    const minX = Math.min(...locations.map((location) => location.map_x));
+    const maxX = Math.max(...locations.map((location) => location.map_x));
+    const minY = Math.min(...locations.map((location) => location.map_y));
+    const maxY = Math.max(...locations.map((location) => location.map_y));
+
+    const width = (maxX - minX + 3) * CELL + PADDING_X * 2;
+    const height = (maxY - minY + 3) * CELL + PADDING_Y * 2;
+    this.cameras.main.setBounds(0, 0, width, height);
+
+    const background = this.add.rectangle(width / 2, height / 2, width, height, 0x93c5fd);
+    background.setStrokeStyle(4, 0x60a5fa);
+    this.worldLayer.add(background);
+
+    const grid = this.add.graphics();
+    grid.lineStyle(1, 0x7dd3fc, 0.4);
+    for (let x = 0; x < width; x += CELL) {
+      grid.lineBetween(x, 0, x, height);
+    }
+    for (let y = 0; y < height; y += CELL) {
+      grid.lineBetween(0, y, width, y);
+    }
+    this.worldLayer.add(grid);
+
+    const agentsByLocation = new Map<string, Agent[]>();
+    for (const agent of agents) {
+      const existing = agentsByLocation.get(agent.current_location_id) || [];
+      existing.push(agent);
+      agentsByLocation.set(agent.current_location_id, existing);
+    }
+
+    for (const location of locations) {
+      const x = (location.map_x - minX + 1) * CELL + PADDING_X;
+      const y = (location.map_y - minY + 1) * CELL + PADDING_Y;
+
+      const tile = this.add.rectangle(x, y, 76, 76, 0xf8fafc);
+      tile.setStrokeStyle(4, 0x334155);
+      this.worldLayer.add(tile);
+
+      const title = this.add.text(x, y - 58, location.name, {
+        color: "#0f172a",
+        fontSize: "14px",
+        fontFamily: "Arial",
+        align: "center",
+        wordWrap: { width: 120 },
+      });
+      title.setOrigin(0.5, 0.5);
+      this.worldLayer.add(title);
+
+      const idText = this.add.text(x, y + 50, location.id, {
+        color: "#475569",
+        fontSize: "10px",
+        fontFamily: "Consolas",
+        align: "center",
+      });
+      idText.setOrigin(0.5, 0.5);
+      this.worldLayer.add(idText);
+
+      const locationAgents = agentsByLocation.get(location.id) || [];
+      locationAgents.forEach((agent, index) => {
+        const offsetX = -18 + (index % 3) * 18;
+        const offsetY = index >= 3 ? 18 : 0;
+        const marker = this.add.circle(x + offsetX, y + offsetY, 10, colorForAgent(agent.id));
+        marker.setStrokeStyle(2, 0x0f172a);
+        this.worldLayer.add(marker);
+
+        const initials = this.add.text(x + offsetX, y + offsetY, getInitials(agent.name), {
+          color: "#ffffff",
+          fontSize: "9px",
+          fontFamily: "Arial",
+        });
+        initials.setOrigin(0.5, 0.5);
+        this.worldLayer.add(initials);
+      });
+    }
+  }
+}
