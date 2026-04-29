@@ -1,48 +1,32 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { BoardClient } from "@/components/board-client";
 import { TownhallShell } from "@/components/townhall-shell";
-import { getBoardIssues } from "@/lib/issues";
 import { BoardIssue } from "@/lib/types";
 
 type Props = {
   repoSlug: string;
+  initialIssues: BoardIssue[];
+  snapshotGeneratedAt: string;
 };
 
-export function TownhallPageClient({ repoSlug }: Props) {
-  const [issues, setIssues] = useState<BoardIssue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+function formatSnapshotDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadIssues() {
-      try {
-        setLoading(true);
-        setErrorMessage(null);
-        const nextIssues = await getBoardIssues();
-        if (!cancelled) {
-          setIssues(nextIssues);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setErrorMessage(error instanceof Error ? error.message : "Unknown GitHub fetch failure");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadIssues();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+export function TownhallPageClient({ repoSlug, initialIssues, snapshotGeneratedAt }: Props) {
+  const [issues] = useState<BoardIssue[]>(initialIssues);
+  const loading = false;
 
   const { unclaimed, claimed, lanes } = useMemo(() => {
     const openCount = issues.filter((issue) => !issue.claim.claimedBy).length;
@@ -74,6 +58,7 @@ export function TownhallPageClient({ repoSlug }: Props) {
                 <span className="pill accent">{repoSlug}</span>
                 <span className="pill">no auth</span>
                 <span className="pill">claim with /claim</span>
+                <span className="pill">snapshot: {formatSnapshotDate(snapshotGeneratedAt)}</span>
               </div>
 
               <div className="cta-row">
@@ -136,21 +121,11 @@ export function TownhallPageClient({ repoSlug }: Props) {
             !
           </span>
           <span>
-            Only community issues show up here. Anything labeled <code>architecture-sensitive</code> or
+            This board is served from a build-time snapshot so GitHub Pages does not get wrecked by public API rate limits.
+            Only community issues show up here, and anything labeled <code>architecture-sensitive</code> or
             <code> maintainer-only</code> stays off the board.
           </span>
         </div>
-
-        {errorMessage ? (
-          <div className="notice danger">
-            <span className="notice-icon" aria-hidden>
-              x
-            </span>
-            <span>
-              GitHub fetch failed: <code>{errorMessage}</code>
-            </span>
-          </div>
-        ) : null}
 
         <section id="board">
           <BoardClient issues={issues} repoSlug={repoSlug} loading={loading} />

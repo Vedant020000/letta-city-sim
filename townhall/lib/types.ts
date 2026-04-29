@@ -42,3 +42,9 @@ export type BoardIssue = GitHubIssue & {
   difficulty: string;
   isCommunityVisible: boolean;
 };
+
+export type BoardSnapshot = {
+  generated_at: string;
+  repo_slug: string;
+  issues: BoardIssue[];
+};

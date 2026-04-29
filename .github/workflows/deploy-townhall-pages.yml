@@ -6,10 +6,15 @@ on:
     paths:
       - "townhall/**"
       - ".github/workflows/deploy-townhall-pages.yml"
+  issues:
+    types: [opened, edited, reopened, closed, labeled, unlabeled]
+  issue_comment:
+    types: [created, edited, deleted]
   workflow_dispatch:
 
 permissions:
   contents: read
+  issues: read
   pages: write
   id-token: write
 
@@ -39,6 +44,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Refresh board snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_PUBLIC_GITHUB_REPO_OWNER: Vedant020000
+          NEXT_PUBLIC_GITHUB_REPO_NAME: letta-city-sim
+        run: npm run sync-board
 
       - name: Build static site
         env:
