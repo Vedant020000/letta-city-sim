@@ -37,6 +37,7 @@ use routes::inventory::{
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
+use routes::sleep::{start_sleep, wake_up};
 use routes::world::get_world_time;
 use state::AppState;
 use ws_events::ws_events;
@@ -82,6 +83,8 @@ async fn main() -> AppResult<()> {
         .route("/agents/:id/location", patch(update_agent_location))
         .route("/agents/:id/activity", patch(update_agent_activity))
         .route("/agents/:id/activity", delete(clear_agent_activity))
+        .route("/agents/sleep", post(start_sleep))
+        .route("/agents/sleep", delete(wake_up))
         .route("/agents/use-item", post(use_item))
         .route("/agents/:id/economy", patch(update_economy))
         .route("/inventory/:id", get(get_agent_inventory))

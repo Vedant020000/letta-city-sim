@@ -24,6 +24,8 @@ node .\lcity\bin\lcity.mjs health_check
 - `list_locations`, `get_location --id`, `nearby_locations --id`
 - `pathfind --from --to`
 - `world_time`
+- `sleep` — if the current location has exactly one usable bed, set the agent to sleeping and occupy that bed
+- `wake_up` — exit sleep state and clear the occupied bed marker
 - `list_inventory`
 - `use_item --item-id <id> --quantity <n>` — consume stackable items, adjusts vitals
 - `economy_update --amount-cents <n> [--reason "<text>"]` — credit (positive) or debit (negative) agent balance

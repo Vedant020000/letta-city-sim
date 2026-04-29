@@ -6,4 +6,5 @@ pub mod inventory;
 pub mod locations;
 pub mod objects;
 pub mod pathfind;
+pub mod sleep;
 pub mod world;

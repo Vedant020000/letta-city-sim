@@ -215,7 +215,81 @@ Expect:
 
 ---
 
-## 9) Interrupt / wake pipeline
+## 9) Sleep interaction
+
+Validate room-level sleep behavior using a seeded bed object.
+
+### 9.1 Ensure seeded bed exists
+
+After seeding, confirm the bedroom has a sleep-capable bed object:
+
+```powershell
+curl.exe http://localhost:3001/objects/lin_bedroom
+```
+
+Expect a bed object such as `bed_lin_bedroom` with `occupied_by: null` and `sleep` in `actions`.
+
+### 9.2 Put the agent in the bedroom and start sleep
+
+```powershell
+$env:SIM_API_KEY="devkey"
+
+curl.exe -X PATCH http://localhost:3001/agents/move ^
+  -H "Content-Type: application/json" ^
+  -H "x-agent-id: eddy_lin" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
+  -d "{\"location_id\":\"lin_bedroom\"}"
+
+curl.exe -X POST http://localhost:3001/agents/sleep ^
+  -H "x-agent-id: eddy_lin" ^
+  -H "x-sim-key: $env:SIM_API_KEY"
+```
+
+Expect:
+- 200 response
+- agent state becomes `sleeping`
+- `current_activity` becomes `Sleeping`
+- bed state updates to `occupied_by = eddy_lin`
+- event logged as `agent.sleep.started`
+
+### 9.3 Wake the agent
+
+```powershell
+curl.exe -X DELETE http://localhost:3001/agents/sleep ^
+  -H "x-agent-id: eddy_lin" ^
+  -H "x-sim-key: $env:SIM_API_KEY"
+```
+
+Expect:
+- 200 response
+- agent state becomes `idle`
+- `current_activity` clears
+- bed state returns to `occupied_by = null`
+- event logged as `agent.sleep.ended`
+
+### 9.4 CLI sleep/wake commands
+
+```powershell
+$env:SIM_API_KEY="devkey"
+Set-Content .lcity\agent_id "eddy_lin"
+
+node .\lcity\bin\lcity.mjs sleep
+node .\lcity\bin\lcity.mjs wake_up
+```
+
+Expect:
+- both commands return machine-readable JSON
+- notifications describe sleep/wake transitions
+
+### 9.5 Error checks
+
+- trying to sleep outside a room with a usable bed => 400
+- trying to sleep while already sleeping => 400
+- trying to wake while not sleeping => 400
+
+---
+
+## 10) Interrupt / wake pipeline
 
 Start the local daemon and verify both event-driven and manual interrupts pass through the same path.
 
@@ -237,7 +311,7 @@ Expect:
 
 ---
 
-## 10) Regression checklist
+## 11) Regression checklist
 
 - Unknown IDs => 404 where expected
 - Invalid payloads => 400 where expected

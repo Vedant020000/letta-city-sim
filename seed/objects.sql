@@ -1,5 +1,6 @@
 INSERT INTO world_objects (id, name, location_id, state, actions)
 VALUES
+  ('bed_lin_bedroom', 'Eddy''s Bed', 'lin_bedroom', '{"occupied_by": null}', ARRAY['sleep']),
   ('stove_lin_kitchen', 'Lin Kitchen Stove', 'lin_kitchen', '{"on": false}', ARRAY['turn_on', 'turn_off', 'cook']),
   ('piano_lin_living', 'Living Room Piano', 'lin_living_room', '{"in_use": false}', ARRAY['play', 'practice']),
   ('coffee_machine_hobbs', 'Hobbs Coffee Machine', 'hobbs_cafe_counter', '{"on": true}', ARRAY['brew', 'clean']),

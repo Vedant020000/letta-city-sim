@@ -384,12 +384,22 @@ const COMMANDS = {
       return `/pathfind?from=${from}&to=${to}`;
     },
   },
-  world_time: {
-    route: "/world/time",
-  },
-  list_inventory: {
-    route: (ctx) =>
-      `/inventory/${encodeURIComponent(resolveAgentId(ctx.agentIdFile))}`,
+    world_time: {
+      route: "/world/time",
+    },
+    sleep: {
+      route: "/agents/sleep",
+      method: "POST",
+      requiresAgent: true,
+    },
+    wake_up: {
+      route: "/agents/sleep",
+      method: "DELETE",
+      requiresAgent: true,
+    },
+    list_inventory: {
+      route: (ctx) =>
+        `/inventory/${encodeURIComponent(resolveAgentId(ctx.agentIdFile))}`,
   },
   board_read: {
     route: "/board",
@@ -503,9 +513,11 @@ function usage() {
     "lcity list_locations",
     "lcity get_location --id lin_kitchen",
     "lcity nearby_locations --id lin_kitchen",
-    "lcity pathfind --from lin_bedroom --to hobbs_cafe_seating",
-    "lcity world_time",
-    "lcity list_inventory",
+      "lcity pathfind --from lin_bedroom --to hobbs_cafe_seating",
+      "lcity world_time",
+      "lcity sleep",
+      "lcity wake_up",
+      "lcity list_inventory",
     "lcity board_read",
     "lcity board_posts",
     "lcity board_post --text \"Town hall at 6 PM\"",
