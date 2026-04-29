@@ -29,14 +29,13 @@ use routes::board::{
 };
 use routes::economy::update_economy;
 use routes::events::{create_event, list_events};
-use routes::inventory::transfer_item_between_agents;
 use routes::intentions::{
     create_agent_intention, get_current_agent_intention, list_agent_intentions,
     list_current_intentions, update_agent_intention,
 };
+use routes::inventory::transfer_item_between_agents;
 use routes::inventory::{
-    add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory,
-    use_item,
+    add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory, use_item,
 };
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::objects::{list_objects_by_location, update_object_state};
@@ -78,7 +77,10 @@ async fn main() -> AppResult<()> {
         .route("/world/time", get(get_world_time))
         .route("/locations/:id", get(get_location_by_id))
         .route("/locations/:id/nearby", get(get_nearby_locations))
-        .route("/locations/:location_id/objects", get(list_objects_by_location))
+        .route(
+            "/locations/:location_id/objects",
+            get(list_objects_by_location),
+        )
         .route("/objects/:id", patch(update_object_state))
         .route("/pathfind", get(get_path))
         .route("/agents", get(list_agents))
@@ -87,8 +89,14 @@ async fn main() -> AppResult<()> {
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/intentions", get(list_agent_intentions))
         .route("/agents/:id/intentions", post(create_agent_intention))
-        .route("/agents/:id/intentions/current", get(get_current_agent_intention))
-        .route("/agents/:id/intentions/:intention_id", patch(update_agent_intention))
+        .route(
+            "/agents/:id/intentions/current",
+            get(get_current_agent_intention),
+        )
+        .route(
+            "/agents/:id/intentions/:intention_id",
+            patch(update_agent_intention),
+        )
         .route("/agents/:id/location", patch(update_agent_location))
         .route("/agents/:id/activity", patch(update_agent_activity))
         .route("/agents/:id/activity", delete(clear_agent_activity))
