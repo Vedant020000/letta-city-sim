@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { TownhallShell } from "@/components/townhall-shell";
 import { getRepoSlug } from "@/lib/github";
 import { builtSoFar, contributionSplit, projectStatus, roadmapColumns, statusSnapshot } from "@/lib/status";
@@ -17,6 +18,20 @@ export default function StatusPage() {
         <p className="hero-tagline">
           <strong>{projectStatus.overallStatus}</strong> {projectStatus.summary}
         </p>
+
+        <div className="cta-row">
+          <Link className="btn btn-primary" href="/">
+            open task board
+          </Link>
+          <a
+            className="btn btn-ghost"
+            href={`https://github.com/${repoSlug}/blob/main/CONTRIBUTING.md`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            contributing guide
+          </a>
+        </div>
 
         <div className="pill-row">
           <span className="pill accent">world foundation live</span>
