@@ -140,6 +140,8 @@ node .\skills\living-in-letta-city\scripts\lcity-agent.mjs --agent-id eddy_lin h
 node .\skills\living-in-letta-city\scripts\lcity-agent.mjs --agent-id eddy_lin move_to --location-id hobbs_cafe_seating
 ```
 
+When running inside Letta Code, the wrapper can use the runtime `AGENT_ID` env var automatically. Set `LCITY_AGENT_ID` to override the city identity when the sim id differs from the Letta agent id.
+
 ## Documentation
 - Contribution workflow: `CONTRIBUTING.md`
 - Canonical product brief: `docs/letta-city-sim-prd.md`

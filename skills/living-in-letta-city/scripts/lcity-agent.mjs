@@ -31,7 +31,7 @@ const tokens = process.argv.slice(2);
 let repo = defaultRepo();
 let apiBase = process.env.LCITY_API_BASE || "http://localhost:3001";
 let simKey = process.env.SIM_API_KEY || "";
-let agentId = "";
+let agentId = process.env.LCITY_AGENT_ID || process.env.AGENT_ID || "";
 let agentIdFile = "";
 const rest = [];
 
