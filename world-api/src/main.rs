@@ -73,7 +73,7 @@ async fn main() -> AppResult<()> {
         .route("/world/time", get(get_world_time))
         .route("/locations/:id", get(get_location_by_id))
         .route("/locations/:id/nearby", get(get_nearby_locations))
-        .route("/objects/:location_id", get(list_objects_by_location))
+        .route("/locations/:location_id/objects", get(list_objects_by_location))
         .route("/objects/:id", patch(update_object_state))
         .route("/pathfind", get(get_path))
         .route("/agents", get(list_agents))

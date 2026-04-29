@@ -20,7 +20,7 @@ Implemented so far:
 - Pathfinding API (`GET /pathfind` using Dijkstra)
 - Inventory API (list/add/remove/adjacent-only transfer)
 - Notice board API (public text-only + internal audit events)
-- Objects API (`GET /objects/:location_id`, `PATCH /objects/:id`)
+- Objects API (`GET /locations/:location_id/objects`, `PATCH /objects/:id`)
 - Events API (`GET /events`, `POST /events`)
 - World time API (`GET /world/time`)
 - Canonical QA checklist in `TESTING.md`

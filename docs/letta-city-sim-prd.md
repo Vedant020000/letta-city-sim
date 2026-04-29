@@ -113,7 +113,7 @@ INVENTORY
   POST   /inventory/transfer              atomic transfer between two agents or agent ↔ location
 
 WORLD OBJECTS
-  GET    /objects/:locationId             objects present at a location
+  GET    /locations/:locationId/objects   objects present at a location
   PATCH  /objects/:id                     update object state (e.g. stove → { "on": true })
 
 CONVERSATIONS
@@ -509,4 +509,3 @@ volumes:
 - **Public observatory** — read-only hosted demo anyone can watch live
 - **Agent creator UI** — drag-and-drop persona builder to add new citizens
 - **Scenario injector** — predefined drama events ("the cafe runs out of coffee", "it starts raining", "there's a noise complaint about Eddy's piano")
-

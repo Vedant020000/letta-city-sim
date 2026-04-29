@@ -63,16 +63,7 @@ pub async fn list_agents(
 ) -> AppResult<Json<ApiResponse<Vec<Agent>>>> {
     let agents = sqlx::query_as::<_, Agent>(
         r#"
-        SELECT
-            id,
-            name,
-            occupation,
-            current_location_id,
-            state,
-            current_activity,
-            is_npc,
-            is_active,
-            state_updated_at
+        SELECT *
         FROM agents
         ORDER BY name
         "#,
@@ -89,16 +80,7 @@ pub async fn get_agent_by_id(
 ) -> AppResult<Json<ApiResponse<Agent>>> {
     let agent = sqlx::query_as::<_, Agent>(
         r#"
-        SELECT
-            id,
-            name,
-            occupation,
-            current_location_id,
-            state,
-            current_activity,
-            is_npc,
-            is_active,
-            state_updated_at
+        SELECT *
         FROM agents
         WHERE id = $1
         "#,
@@ -208,16 +190,7 @@ async fn perform_agent_location_update(
             state_updated_at = NOW(),
             updated_at = NOW()
         WHERE id = $2
-        RETURNING
-            id,
-            name,
-            occupation,
-            current_location_id,
-            state,
-            current_activity,
-            is_npc,
-            is_active,
-            state_updated_at
+        RETURNING *
         "#,
     )
     .bind(location_id)
@@ -327,16 +300,7 @@ pub async fn update_agent_activity(
             state_updated_at = NOW(),
             updated_at = NOW()
         WHERE id = $2
-        RETURNING
-            id,
-            name,
-            occupation,
-            current_location_id,
-            state,
-            current_activity,
-            is_npc,
-            is_active,
-            state_updated_at
+        RETURNING *
         "#,
     )
     .bind(&payload.activity)
@@ -385,16 +349,7 @@ pub async fn clear_agent_activity(
             state_updated_at = NOW(),
             updated_at = NOW()
         WHERE id = $1
-        RETURNING
-            id,
-            name,
-            occupation,
-            current_location_id,
-            state,
-            current_activity,
-            is_npc,
-            is_active,
-            state_updated_at
+        RETURNING *
         "#,
     )
     .bind(&agent_id)

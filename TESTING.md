@@ -178,7 +178,7 @@ curl.exe -X PATCH http://localhost:3001/board/posts ^
   -H "x-sim-api-key: $env:SIM_API_KEY" ^
   -d "{\"text\":\"Town hall at 6 PM\"}"
 
-curl.exe http://localhost:3001/objects/lin_kitchen
+curl.exe http://localhost:3001/locations/lin_kitchen/objects
 
 curl.exe -X PATCH http://localhost:3001/objects/stove_lin_kitchen ^
   -H "Content-Type: application/json" ^
@@ -224,7 +224,7 @@ Validate room-level sleep behavior using a seeded bed object.
 After seeding, confirm the bedroom has a sleep-capable bed object:
 
 ```powershell
-curl.exe http://localhost:3001/objects/lin_bedroom
+curl.exe http://localhost:3001/locations/lin_bedroom/objects
 ```
 
 Expect a bed object such as `bed_lin_bedroom` with `occupied_by: null` and `sleep` in `actions`.
