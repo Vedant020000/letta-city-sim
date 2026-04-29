@@ -12,6 +12,9 @@ export function PhaserMap({ agents, locations }: Props) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<unknown>(null);
   const sceneRef = useRef<{ applySnapshot: (snapshot: { agents: Agent[]; locations: Location[] }) => void } | null>(null);
+  const snapshotRef = useRef({ agents, locations });
+
+  snapshotRef.current = { agents, locations };
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +54,7 @@ export function PhaserMap({ agents, locations }: Props) {
       });
 
       gameRef.current = game;
-      scene.applySnapshot({ agents, locations });
+      scene.applySnapshot(snapshotRef.current);
     }
 
     mountGame();
@@ -68,7 +71,7 @@ export function PhaserMap({ agents, locations }: Props) {
   }, []);
 
   useEffect(() => {
-    sceneRef.current?.applySnapshot({ agents, locations });
+    sceneRef.current?.applySnapshot(snapshotRef.current);
   }, [agents, locations]);
 
   return <div ref={mountRef} />;
