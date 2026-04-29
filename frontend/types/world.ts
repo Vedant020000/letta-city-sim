@@ -33,6 +33,21 @@ export type Agent = {
   last_vitals_update: string;
 };
 
+export type AgentIntention = {
+  id: string;
+  agent_id: string;
+  summary: string;
+  reason: string;
+  status: "active" | "completed" | "failed" | "abandoned";
+  expected_location_id: string | null;
+  expected_action: string | null;
+  outcome: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
 export type Location = {
   id: string;
   name: string;
@@ -69,6 +84,7 @@ export type SimEvent = {
 
 export type BootstrapSnapshot = {
   agents: Agent[];
+  currentIntentions: AgentIntention[];
   locations: Location[];
   worldTime: WorldTime;
   recentEvents: WorldEventEnvelope[];
@@ -78,6 +94,7 @@ export type SimConnectionState = "idle" | "loading" | "open" | "closed" | "error
 
 export type SimState = {
   agents: Agent[];
+  currentIntentions: AgentIntention[];
   locations: Location[];
   worldTime: WorldTime | null;
   recentEvents: WorldEventEnvelope[];

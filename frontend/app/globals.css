@@ -247,6 +247,17 @@ pre {
   color: var(--muted);
 }
 
+.agent-intention {
+  display: block;
+  margin-top: 0.35rem;
+  color: #bfdbfe;
+}
+
+.agent-intention span {
+  display: block;
+  color: var(--muted);
+}
+
 .feed-list {
   display: grid;
   gap: 10px;

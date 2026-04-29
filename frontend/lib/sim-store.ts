@@ -11,6 +11,7 @@ type SimAction =
 
 export const initialSimState: SimState = {
   agents: [],
+  currentIntentions: [],
   locations: [],
   worldTime: null,
   recentEvents: [],
@@ -62,6 +63,7 @@ export function simReducer(state: SimState, action: SimAction): SimState {
       return {
         ...state,
         agents: action.payload.agents,
+        currentIntentions: action.payload.currentIntentions,
         locations: action.payload.locations,
         worldTime: action.payload.worldTime,
         recentEvents: action.payload.recentEvents,
@@ -73,6 +75,7 @@ export function simReducer(state: SimState, action: SimAction): SimState {
       return {
         ...state,
         agents: action.payload.agents,
+        currentIntentions: action.payload.currentIntentions,
         locations: action.payload.locations,
         worldTime: action.payload.worldTime,
         lastSnapshotAt: new Date().toISOString(),

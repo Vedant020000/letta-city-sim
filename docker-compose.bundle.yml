@@ -17,6 +17,7 @@ services:
       - ./world-api/migrations/0001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
       - ./world-api/migrations/0002_agent_economy_vitals.sql:/docker-entrypoint-initdb.d/002_agent_economy_vitals.sql:ro
       - ./world-api/migrations/0003_inventory_quantity.sql:/docker-entrypoint-initdb.d/003_inventory_quantity.sql:ro
+      - ./world-api/migrations/0004_agent_intentions.sql:/docker-entrypoint-initdb.d/004_agent_intentions.sql:ro
       - ./seed/locations.sql:/docker-entrypoint-initdb.d/101_locations.sql:ro
       - ./seed/adjacency.sql:/docker-entrypoint-initdb.d/102_adjacency.sql:ro
       - ./seed/objects.sql:/docker-entrypoint-initdb.d/103_objects.sql:ro
