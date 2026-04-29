@@ -113,21 +113,22 @@ export class TownScene extends Phaser.Scene {
       tile.setStrokeStyle(4, 0x334155);
       this.worldLayer.add(tile);
 
-      const title = this.add.text(x, y - 58, location.name, {
+      const title = this.add.text(x, y - 22, location.name, {
         color: "#0f172a",
-        fontSize: "14px",
+        fontSize: "10px",
         fontFamily: "Arial",
         align: "center",
-        wordWrap: { width: 120 },
+        wordWrap: { width: TILE_SIZE - 8 },
       });
       title.setOrigin(0.5, 0.5);
       this.worldLayer.add(title);
 
-      const idText = this.add.text(x, y + 50, location.id, {
+      const idText = this.add.text(x, y + 30, location.id, {
         color: "#475569",
-        fontSize: "10px",
+        fontSize: "7px",
         fontFamily: "Consolas",
         align: "center",
+        wordWrap: { width: TILE_SIZE - 8 },
       });
       idText.setOrigin(0.5, 0.5);
       this.worldLayer.add(idText);
@@ -135,7 +136,7 @@ export class TownScene extends Phaser.Scene {
       const locationAgents = agentsByLocation.get(location.id) || [];
       locationAgents.forEach((agent, index) => {
         const offsetX = -18 + (index % 3) * 18;
-        const offsetY = index >= 3 ? 18 : 0;
+        const offsetY = 8 + (index >= 3 ? 18 : 0);
         const marker = this.add.circle(x + offsetX, y + offsetY, 10, colorForAgent(agent.id));
         marker.setStrokeStyle(2, 0x0f172a);
         this.worldLayer.add(marker);
