@@ -11,7 +11,11 @@ VALUES
   ('notice_board', 'The Notice Board', 'A community notice board at the edge of Ville Park. Anyone can post here.', 704, 352),
   ('harvey_oak_floor', 'Harvey Oak Supply (Shop Floor)', 'A small general supply store. Sam works at the counter here.', 320, 480),
   ('oak_classroom_a', 'Oak Hill College - Classroom A', 'A lecture hall where Klaus teaches. Rows of chairs face a chalkboard.', 896, 128),
-  ('oak_staff_office', 'Oak Hill College - Staff Office', 'A cluttered office with stacks of papers and two desks.', 960, 128)
+  ('oak_staff_office', 'Oak Hill College - Staff Office', 'A cluttered office with stacks of papers and two desks.', 960, 128),
+  ('smallville_library_reading_room', 'Smallville Library Reading Room', 'A quiet public reading room with long tables, bulletin flyers, and a window facing Ville Park.', 832, 288),
+  ('smallville_library_archive', 'Smallville Library Archive', 'A compact archive room of town records, old newspapers, maps, and local-history boxes.', 896, 288),
+  ('miller_community_garden', 'Miller Community Garden', 'A small shared garden with vegetable beds, flower rows, and a tool shed near the park path.', 736, 480),
+  ('riverside_clinic_lobby', 'Riverside Clinic Lobby', 'A modest neighborhood clinic lobby with a check-in desk, worn chairs, and health pamphlets.', 576, 448)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     description = EXCLUDED.description,
