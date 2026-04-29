@@ -85,6 +85,14 @@ export function TownhallPageClient({ repoSlug }: Props) {
                 </Link>
                 <a
                   className="btn btn-ghost"
+                  href="https://buymeacoffee.com/vedant0200"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  buy me a coffee
+                </a>
+                <a
+                  className="btn btn-ghost"
                   href={`https://github.com/${repoSlug}/blob/main/docs/community-contributions.md`}
                   target="_blank"
                   rel="noreferrer"
