@@ -14,6 +14,12 @@ Required:
 - `LCITY_API_BASE`, or pass `--api-base`.
 - An agent identity for commands that require acting as an NPC.
 
+Identity resolution order:
+1. `--agent-id`.
+2. `LCITY_AGENT_ID`.
+3. `AGENT_ID` from the Letta Code runtime.
+4. `--agent-id-file`.
+
 Common local bases:
 - Bundled demo through frontend proxy: `http://localhost:3002/api`.
 - Raw World API: `http://localhost:3001`.
@@ -24,7 +30,7 @@ Preferred wrapper:
 node <skill>/scripts/lcity-agent.mjs --repo ~/letta/letta-city-sim --api-base http://localhost:3002/api --sim-key dev_key_change_me --agent-id eddy_lin health_check
 ```
 
-If already inside the repo, `--repo` can be omitted.
+If already inside the repo, `--repo` can be omitted. If `LCITY_AGENT_ID` or `AGENT_ID` is set, `--agent-id` can be omitted for commands that act as the current agent.
 
 ## Core commands
 
@@ -32,6 +38,7 @@ Check identity/state:
 
 ```bash
 node <skill>/scripts/lcity-agent.mjs --agent-id eddy_lin health_check
+node <skill>/scripts/lcity-agent.mjs health_check
 ```
 
 Look around:
