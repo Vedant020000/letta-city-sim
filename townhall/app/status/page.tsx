@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { TownhallShell } from "@/components/townhall-shell";
+import { devLogEntries } from "@/lib/devlog";
 import { getRepoSlug } from "@/lib/github";
 import { builtSoFar, contributionSplit, projectStatus, roadmapColumns, statusSnapshot } from "@/lib/status";
+
+function isExternalLink(href: string) {
+  return href.startsWith("http://") || href.startsWith("https://");
+}
 
 export default function StatusPage() {
   const repoSlug = getRepoSlug();
@@ -101,14 +106,68 @@ export default function StatusPage() {
         </div>
       </section>
 
-      <section className="status-section paper-section devlog-placeholder">
+      <section className="status-section paper-section devlog-section">
         <div className="section-head">
           <h2>dev log / updates</h2>
-          <span className="count">coming next</span>
+          <span className="count">newest first</span>
         </div>
         <p className="status-body-copy">
-          This is where the public thread of city-sim updates will live. For now, the status page is the clean snapshot;
-          later we can add timestamped dev logs, screenshots, and short progress posts below it.
+          Recent project milestones, shipped pieces, and progress snapshots live here. It is a simple public timeline for now;
+          richer media posts and longer updates can come later.
+        </p>
+
+        <div className="devlog-timeline">
+          {devLogEntries.map((entry) => (
+            <article className="devlog-entry" key={entry.id}>
+              <div className="devlog-entry-rail" aria-hidden>
+                <span className="devlog-dot" />
+              </div>
+
+              <div className="devlog-entry-body">
+                <div className="devlog-meta-row">
+                  <span className="devlog-date">{entry.date}</span>
+                  <span className={`devlog-tag devlog-tag-${entry.category}`}>{entry.category}</span>
+                </div>
+
+                <h3 className="devlog-title">{entry.title}</h3>
+                <p className="devlog-summary">{entry.summary}</p>
+
+                {entry.bullets?.length ? (
+                  <ul className="status-list compact devlog-list">
+                    {entry.bullets.map((bullet) => (
+                      <li key={bullet}>{bullet}</li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                {entry.links?.length ? (
+                  <div className="devlog-link-row">
+                    {entry.links.map((link) =>
+                      isExternalLink(link.href) ? (
+                        <a
+                          key={`${entry.id}-${link.href}`}
+                          className="devlog-link"
+                          href={link.href}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {link.label}
+                        </a>
+                      ) : (
+                        <Link key={`${entry.id}-${link.href}`} className="devlog-link" href={link.href}>
+                          {link.label}
+                        </Link>
+                      ),
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <p className="status-body-copy devlog-footer-note">
+          More short-form updates, screenshots, and progress posts can layer into this thread later without changing the overall status-page structure.
         </p>
       </section>
     </TownhallShell>
