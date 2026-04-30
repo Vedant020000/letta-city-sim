@@ -17,8 +17,7 @@ Required:
 Identity resolution order:
 1. `--agent-id`.
 2. `LCITY_AGENT_ID`.
-3. `AGENT_ID` from the Letta Code runtime.
-4. `--agent-id-file`.
+3. `--agent-id-file`.
 
 Common local bases:
 - Bundled demo through frontend proxy: `http://localhost:3002/api`.
@@ -30,7 +29,9 @@ Preferred wrapper:
 node <skill>/scripts/lcity-agent.mjs --repo ~/letta/letta-city-sim --api-base http://localhost:3002/api --sim-key dev_key_change_me --agent-id eddy_lin health_check
 ```
 
-If already inside the repo, `--repo` can be omitted. If `LCITY_AGENT_ID` or `AGENT_ID` is set, `--agent-id` can be omitted for commands that act as the current agent.
+If already inside the repo, `--repo` can be omitted. If `LCITY_AGENT_ID` is set, `--agent-id` can be omitted for commands that act as the current agent.
+
+Do **not** assume the Letta Code runtime `AGENT_ID` matches the city-sim NPC id. In practice those are usually different identifiers, so set `LCITY_AGENT_ID` explicitly when running the skill inside Letta Code.
 
 ## Core commands
 
