@@ -86,6 +86,43 @@ Expect:
 
 ---
 
+## 3.5) Jobs catalog + assignment
+
+Validate the seeded town/meta jobs and assignment endpoints.
+
+```powershell
+curl.exe http://localhost:3001/jobs
+curl.exe http://localhost:3001/jobs/dispatcher
+curl.exe http://localhost:3001/jobs/music_student/agents
+curl.exe http://localhost:3001/agents/eddy_lin/jobs
+
+curl.exe -X PATCH http://localhost:3001/agents/eddy_lin/jobs/writer ^
+  -H "Content-Type: application/json" ^
+  -H "x-sim-key: $env:SIM_API_KEY" ^
+  -d "{\"is_primary\":false,\"notes\":\"Docs support\"}"
+
+curl.exe -X DELETE http://localhost:3001/agents/eddy_lin/jobs/writer ^
+  -H "x-sim-key: $env:SIM_API_KEY"
+```
+
+Expect:
+- `/jobs` includes both `town` and `meta` roles
+- starter agents have seeded primary town jobs (`music_student`, `cafe_owner`, etc.)
+- assignment and removal append events without mutating prior event history
+- assigning `--primary` through the API leaves at most one primary job for an agent
+
+CLI smoke tests:
+
+```powershell
+node .\lcity\bin\lcity.mjs list_jobs
+node .\lcity\bin\lcity.mjs get_job --id dispatcher
+node .\lcity\bin\lcity.mjs list_agent_jobs --agent-id eddy_lin
+node .\lcity\bin\lcity.mjs assign_job --agent-id eddy_lin --job-id writer --notes "Docs support"
+node .\lcity\bin\lcity.mjs remove_job --agent-id eddy_lin --job-id writer
+```
+
+---
+
 ## 4) Inventory core + transfer adjacency
 
 ```powershell

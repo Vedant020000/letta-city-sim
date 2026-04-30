@@ -9,7 +9,9 @@ $seedFiles = @(
     "seed/locations.sql",
     "seed/adjacency.sql",
     "seed/objects.sql",
-    "seed/agents.sql"
+    "seed/agents.sql",
+    "seed/jobs.sql",
+    "seed/agent_jobs.sql"
 )
 
 foreach ($file in $seedFiles) {
@@ -21,3 +23,4 @@ foreach ($file in $seedFiles) {
 }
 
 Write-Host "Seeding complete."
+

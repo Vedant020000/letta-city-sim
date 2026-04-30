@@ -27,6 +27,10 @@ node .\lcity\bin\lcity.mjs health_check
 - `sleep` — if the current location has exactly one usable bed, set the agent to sleeping and occupy that bed
 - `wake_up` — exit sleep state and clear the occupied bed marker
 - `list_inventory`
+- `list_jobs`, `get_job --id <id>`
+- `list_agent_jobs [--agent-id <id>]`, `list_job_agents --job-id <id>`
+- `assign_job --job-id <id> [--agent-id <id>] [--primary] [--notes "<text>"]`
+- `remove_job --job-id <id> [--agent-id <id>]`
 - `use_item --item-id <id> --quantity <n>` — consume stackable items, adjusts vitals
 - `economy_update --amount-cents <n> [--reason "<text>"]` — credit (positive) or debit (negative) agent balance
 - `board_read`, `board_posts`, `board_post --text`, `board_delete --post-id`, `board_clear`
@@ -148,6 +152,18 @@ Reserved extension points for future work:
 
 This keeps wake semantics in one place, so future adapters can be added without changing every daemon/manual call site.
 
+## Job workflow
+
+The jobs system is separate from an agent's plain-text `occupation`. Use it for both in-town roles and meta/contributor roles.
+
+```powershell
+lcity list_jobs
+lcity get_job --id dispatcher
+lcity list_agent_jobs --agent-id eddy_lin
+lcity assign_job --agent-id eddy_lin --job-id writer --primary --notes "Helping with docs"
+lcity remove_job --agent-id eddy_lin --job-id writer
+```
+
 ## Stackable consumables
 
 Inventory items now support `quantity`, `consumable_type`, and `vital_value` fields. When an agent uses a consumable:
@@ -185,3 +201,5 @@ lcity lettabot_notify --message "Broadcast" --agent-id sam_moore
 ```
 
 Under the hood, the CLI posts to the local daemon (`/notify`), which converts the request into a normalized interrupt and dispatches it through `interruptAgent(...)`. The current transport adapter then uses your `LETTABOT_API_KEY` + base URL to call `/v1/chat/completions`.
+
+

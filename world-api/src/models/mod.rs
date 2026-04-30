@@ -4,6 +4,7 @@ pub mod common;
 pub mod event;
 pub mod intention;
 pub mod inventory;
+pub mod job;
 pub mod location;
 pub mod object;
 pub mod pathfind;

@@ -37,6 +37,9 @@ use routes::inventory::transfer_item_between_agents;
 use routes::inventory::{
     add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory, use_item,
 };
+use routes::jobs::{
+    get_job_by_id, list_agent_jobs, list_job_agents, list_jobs, remove_agent_job, upsert_agent_job,
+};
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
@@ -86,9 +89,15 @@ async fn main() -> AppResult<()> {
         .route("/agents", get(list_agents))
         .route("/agents/health", get(agent_health_check))
         .route("/agents/move", patch(move_agent_with_header))
+        .route("/jobs", get(list_jobs))
+        .route("/jobs/:id", get(get_job_by_id))
+        .route("/jobs/:id/agents", get(list_job_agents))
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/intentions", get(list_agent_intentions))
         .route("/agents/:id/intentions", post(create_agent_intention))
+        .route("/agents/:id/jobs", get(list_agent_jobs))
+        .route("/agents/:id/jobs/:job_id", patch(upsert_agent_job))
+        .route("/agents/:id/jobs/:job_id", delete(remove_agent_job))
         .route(
             "/agents/:id/intentions/current",
             get(get_current_agent_intention),

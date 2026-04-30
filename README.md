@@ -16,6 +16,7 @@ Implemented so far:
 - World API scaffold with Axum + sqlx + Postgres migration
 - Seed data + idempotent seeding script (`scripts/seed.ps1`)
 - Agents API (list/detail/move/activity)
+- Jobs API + seeded town/meta role catalog (`jobs`, `agent_jobs`)
 - Locations API (list/detail/nearby)
 - Pathfinding API (`GET /pathfind` using Dijkstra)
 - Inventory API (list/add/remove/adjacent-only transfer)
@@ -92,6 +93,7 @@ That compose file initializes Postgres with the current migrations + seed SQL an
 ```powershell
 curl.exe http://localhost:3001/health
 curl.exe http://localhost:3001/agents
+curl.exe http://localhost:3001/jobs
 curl.exe "http://localhost:3001/pathfind?from=lin_bedroom&to=hobbs_cafe_seating"
 curl.exe http://localhost:3001/board
 curl.exe http://localhost:3001/world/time
@@ -148,6 +150,7 @@ When running inside Letta Code, set `LCITY_AGENT_ID` explicitly for the city-sim
 - Full execution checklist: `docs/letta-city-sim-extensive-todo.md`
 - Community contribution breakdown: `docs/community-contributions.md`
 - Contributor guides index: `docs/guides/README.md`
+- Jobs guide: `docs/guides/adding-jobs.md`
 - Location guide: `docs/guides/adding-locations.md`
 - Items/consumables guide: `docs/guides/adding-items-and-consumables.md`
 - Playtesting guide: `docs/guides/playtesting.md`

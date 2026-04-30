@@ -122,6 +122,7 @@ Use these before starting a contribution:
 
 - `docs/community-contributions.md`
 - `docs/guides/README.md`
+- `docs/guides/adding-jobs.md`
 - `docs/guides/adding-locations.md`
 - `docs/guides/adding-items-and-consumables.md`
 - `docs/guides/playtesting.md`

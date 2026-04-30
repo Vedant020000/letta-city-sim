@@ -18,10 +18,13 @@ services:
       - ./world-api/migrations/0002_agent_economy_vitals.sql:/docker-entrypoint-initdb.d/002_agent_economy_vitals.sql:ro
       - ./world-api/migrations/0003_inventory_quantity.sql:/docker-entrypoint-initdb.d/003_inventory_quantity.sql:ro
       - ./world-api/migrations/0004_agent_intentions.sql:/docker-entrypoint-initdb.d/004_agent_intentions.sql:ro
+      - ./world-api/migrations/0005_jobs.sql:/docker-entrypoint-initdb.d/005_jobs.sql:ro
       - ./seed/locations.sql:/docker-entrypoint-initdb.d/101_locations.sql:ro
       - ./seed/adjacency.sql:/docker-entrypoint-initdb.d/102_adjacency.sql:ro
       - ./seed/objects.sql:/docker-entrypoint-initdb.d/103_objects.sql:ro
       - ./seed/agents.sql:/docker-entrypoint-initdb.d/104_agents.sql:ro
+      - ./seed/jobs.sql:/docker-entrypoint-initdb.d/105_jobs.sql:ro
+      - ./seed/agent_jobs.sql:/docker-entrypoint-initdb.d/106_agent_jobs.sql:ro
 
   app:
     build:
@@ -40,3 +43,4 @@ services:
 
 volumes:
   pgdata_bundle:
+

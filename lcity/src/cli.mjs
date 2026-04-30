@@ -198,6 +198,29 @@ function resolveAgentId(agentIdFile) {
   }
 }
 
+function resolveTargetAgentId(ctx, options) {
+  const override = options["agent-id"];
+  if (override && String(override).trim()) {
+    return String(override).trim();
+  }
+
+  return resolveAgentId(ctx.agentIdFile);
+}
+
+function buildJobAssignmentBody(options) {
+  const body = {};
+
+  if (Object.prototype.hasOwnProperty.call(options, "primary")) {
+    body.is_primary = String(options.primary).trim().toLowerCase() === "true";
+  }
+
+  if (Object.prototype.hasOwnProperty.call(options, "notes")) {
+    body.notes = String(options.notes);
+  }
+
+  return body;
+}
+
 function resolveSimKey(simKey) {
   if (simKey && String(simKey).trim()) return String(simKey).trim();
   throw new Error("missing SIM_API_KEY (set env or pass --sim-key)");
@@ -444,6 +467,36 @@ const COMMANDS = {
       route: (ctx) =>
         `/inventory/${encodeURIComponent(resolveAgentId(ctx.agentIdFile))}`,
   },
+  list_jobs: {
+    route: "/jobs",
+    requireSimKey: false,
+  },
+  get_job: {
+    route: (_ctx, options) =>
+      `/jobs/${encodeURIComponent(required(options, "id"))}`,
+    requireSimKey: false,
+  },
+  list_agent_jobs: {
+    route: (ctx, options) =>
+      `/agents/${encodeURIComponent(resolveTargetAgentId(ctx, options))}/jobs`,
+    requireSimKey: false,
+  },
+  list_job_agents: {
+    route: (_ctx, options) =>
+      `/jobs/${encodeURIComponent(required(options, "job-id"))}/agents`,
+    requireSimKey: false,
+  },
+  assign_job: {
+    route: (ctx, options) =>
+      `/agents/${encodeURIComponent(resolveTargetAgentId(ctx, options))}/jobs/${encodeURIComponent(required(options, "job-id"))}`,
+    method: "PATCH",
+    buildBody: (options) => buildJobAssignmentBody(options),
+  },
+  remove_job: {
+    route: (ctx, options) =>
+      `/agents/${encodeURIComponent(resolveTargetAgentId(ctx, options))}/jobs/${encodeURIComponent(required(options, "job-id"))}`,
+    method: "DELETE",
+  },
   board_read: {
     route: "/board",
   },
@@ -561,6 +614,12 @@ function usage() {
       "lcity sleep",
       "lcity wake_up",
       "lcity list_inventory",
+    "lcity list_jobs",
+    "lcity get_job --id dispatcher",
+    "lcity list_agent_jobs [--agent-id eddy_lin]",
+    "lcity list_job_agents --job-id dispatcher",
+    "lcity assign_job --job-id writer [--agent-id eddy_lin] [--primary] [--notes \"Draft docs\"]",
+    "lcity remove_job --job-id writer [--agent-id eddy_lin]",
     "lcity board_read",
     "lcity board_posts",
     "lcity board_post --text \"Town hall at 6 PM\"",
@@ -987,6 +1046,35 @@ export async function run(argv) {
       case "list_inventory": {
         const agentId = resolveAgentId(ctx.agentIdFile);
         return callApi(ctx, `/inventory/${encodeURIComponent(agentId)}`);
+      }
+      case "list_jobs":
+        return callApi(ctx, "/jobs", { requireSimKey: false });
+      case "get_job":
+        return callApi(ctx, `/jobs/${encodeURIComponent(required(options, "id"))}`, {
+          requireSimKey: false,
+        });
+      case "list_agent_jobs": {
+        const agentId = resolveTargetAgentId(ctx, options);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/jobs`, {
+          requireSimKey: false,
+        });
+      }
+      case "list_job_agents":
+        return callApi(ctx, `/jobs/${encodeURIComponent(required(options, "job-id"))}/agents`, {
+          requireSimKey: false,
+        });
+      case "assign_job": {
+        const agentId = resolveTargetAgentId(ctx, options);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/jobs/${encodeURIComponent(required(options, "job-id"))}`, {
+          method: "PATCH",
+          body: buildJobAssignmentBody(options),
+        });
+      }
+      case "remove_job": {
+        const agentId = resolveTargetAgentId(ctx, options);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/jobs/${encodeURIComponent(required(options, "job-id"))}`, {
+          method: "DELETE",
+        });
       }
       case "board_read":
         return callApi(ctx, "/board");

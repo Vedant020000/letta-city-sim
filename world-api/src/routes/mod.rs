@@ -4,6 +4,7 @@ pub mod economy;
 pub mod events;
 pub mod intentions;
 pub mod inventory;
+pub mod jobs;
 pub mod locations;
 pub mod objects;
 pub mod pathfind;

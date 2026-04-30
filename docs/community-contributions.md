@@ -6,6 +6,7 @@ For practical contributor onboarding, also see:
 
 - `../CONTRIBUTING.md`
 - `guides/README.md`
+- `guides/adding-jobs.md`
 - `guides/adding-locations.md`
 - `guides/adding-items-and-consumables.md`
 - `guides/playtesting.md`
@@ -45,6 +46,13 @@ Suggested labels:
 - `community`
 - `backend`
 - `help wanted`
+
+For job-related contributions specifically:
+
+- use `seed/jobs.sql` for new job definitions
+- use `seed/agent_jobs.sql` for seeded assignments
+- keep broad scheduling/payroll/orchestration redesigns maintainer-owned
+- prefer the guide in `docs/guides/adding-jobs.md` when opening or implementing job issues
 
 ### 2. Frontend
 - town map UI
