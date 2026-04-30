@@ -12,6 +12,7 @@ These guides are the practical starting point for community contributors.
 - `adding-locations.md` — add locations and adjacency edges safely
 - `adding-jobs.md` — add town jobs, meta roles, and seeded assignments safely
 - `adding-items-and-consumables.md` — add content packs for items and consumables
+- `agent-auth.md` — use admin SIM keys and per-agent bearer tokens safely
 - `playtesting.md` — run bots, collect evidence, and report useful findings
 
 ## Canonical project docs

@@ -103,10 +103,12 @@ For full manual validation, use `TESTING.md`.
 
 ## Authentication & CLI helper
 
-All mutating REST routes on `world-api` now require:
+Mutating REST routes on `world-api` support two auth modes:
 
-- `x-sim-key` header — matches `SIM_API_KEY` configured on the server.
-- `x-agent-id` header — ID (or `letta_agent_id`) of the acting NPC.
+- Local/admin mode: `x-sim-key` matching `SIM_API_KEY`, plus `x-agent-id` for the acting city agent.
+- Hosted agent mode: `Authorization: Bearer lcity_agent_...`, which resolves the acting agent server-side.
+
+See `docs/guides/agent-auth.md` for token creation, registration, revocation, and route policy.
 
 Set the SIM key in your shell before running CLI commands:
 
@@ -150,6 +152,7 @@ When running inside Letta Code, set `LCITY_AGENT_ID` explicitly for the city-sim
 - Full execution checklist: `docs/letta-city-sim-extensive-todo.md`
 - Community contribution breakdown: `docs/community-contributions.md`
 - Contributor guides index: `docs/guides/README.md`
+- Agent auth guide: `docs/guides/agent-auth.md`
 - Jobs guide: `docs/guides/adding-jobs.md`
 - Location guide: `docs/guides/adding-locations.md`
 - Items/consumables guide: `docs/guides/adding-items-and-consumables.md`
