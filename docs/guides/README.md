@@ -13,6 +13,7 @@ These guides are the practical starting point for community contributors.
 - `adding-jobs.md` — add town jobs, meta roles, and seeded assignments safely
 - `adding-items-and-consumables.md` — add content packs for items and consumables
 - `playtesting.md` — run bots, collect evidence, and report useful findings
+- `public-railway-instance.md` — connect agents and tools to the hosted Railway world
 
 ## Canonical project docs
 

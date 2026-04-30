@@ -154,4 +154,5 @@ When running inside Letta Code, set `LCITY_AGENT_ID` explicitly for the city-sim
 - Location guide: `docs/guides/adding-locations.md`
 - Items/consumables guide: `docs/guides/adding-items-and-consumables.md`
 - Playtesting guide: `docs/guides/playtesting.md`
+- Public Railway guide: `docs/guides/public-railway-instance.md`
 - Historical docs live under `docs/archive/`
