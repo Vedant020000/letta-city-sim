@@ -1,10 +1,10 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::HeaderMap,
 };
 use chrono::Utc;
 
+use crate::auth::AgentId;
 use crate::error::{AppError, AppResult};
 use crate::models::object::{UpdateWorldObjectRequest, WorldObject};
 use crate::state::AppState;
@@ -45,24 +45,10 @@ pub async fn list_objects_by_location(
 
 pub async fn update_object_state(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    AgentId(actor_id): AgentId,
     Path(object_id): Path<String>,
     Json(payload): Json<UpdateWorldObjectRequest>,
 ) -> AppResult<Json<WorldObject>> {
-    let actor_id = headers
-        .get("x-agent-id")
-        .ok_or_else(|| AppError::BadRequest("missing x-agent-id header".to_string()))?
-        .to_str()
-        .map_err(|_| AppError::BadRequest("invalid x-agent-id header".to_string()))?
-        .trim()
-        .to_string();
-
-    if actor_id.is_empty() {
-        return Err(AppError::BadRequest(
-            "x-agent-id header cannot be empty".to_string(),
-        ));
-    }
-
     let mut tx = state.pool().begin().await?;
 
     let updated_object = sqlx::query_as::<_, WorldObject>(

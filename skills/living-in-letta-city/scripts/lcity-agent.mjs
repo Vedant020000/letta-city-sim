@@ -6,7 +6,7 @@ import path from "node:path";
 
 function usage() {
   console.error(`Usage:
-  lcity-agent.mjs [--repo <path>] [--api-base <url>] [--sim-key <key>] [--agent-id <id>|--agent-id-file <path>] <lcity-command> [args...]
+  lcity-agent.mjs [--repo <path>] [--api-base <url>] [--sim-key <key>|--agent-token <token>] [--agent-id <id>|--agent-id-file <path>] <lcity-command> [args...]
 
 Examples:
   lcity-agent.mjs --agent-id eddy_lin health_check
@@ -31,6 +31,7 @@ const tokens = process.argv.slice(2);
 let repo = defaultRepo();
 let apiBase = process.env.LCITY_API_BASE || "http://localhost:3001";
 let simKey = process.env.SIM_API_KEY || "";
+let agentToken = process.env.LCITY_AGENT_TOKEN || "";
 let agentId = process.env.LCITY_AGENT_ID || "";
 let agentIdFile = "";
 const rest = [];
@@ -40,6 +41,7 @@ for (let i = 0; i < tokens.length; i += 1) {
   if (token === "--repo") repo = expandHome(tokens[++i]);
   else if (token === "--api-base") apiBase = tokens[++i];
   else if (token === "--sim-key") simKey = tokens[++i];
+  else if (token === "--agent-token") agentToken = tokens[++i];
   else if (token === "--agent-id") agentId = tokens[++i];
   else if (token === "--agent-id-file") agentIdFile = expandHome(tokens[++i]);
   else rest.push(token);
@@ -64,6 +66,7 @@ if (agentId && !agentIdFile) {
 
 const args = [lcityPath, "--api-base", apiBase];
 if (simKey) args.push("--sim-key", simKey);
+if (agentToken) args.push("--agent-token", agentToken);
 if (agentIdFile) args.push("--agent-id-file", agentIdFile);
 args.push(...rest);
 
@@ -74,6 +77,7 @@ const result = spawnSync(process.execPath, args, {
     ...process.env,
     LCITY_API_BASE: apiBase,
     SIM_API_KEY: simKey || process.env.SIM_API_KEY || "",
+    LCITY_AGENT_TOKEN: agentToken || process.env.LCITY_AGENT_TOKEN || "",
   },
 });
 

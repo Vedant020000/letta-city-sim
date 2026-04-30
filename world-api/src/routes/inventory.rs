@@ -5,7 +5,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::auth::AgentId;
+use crate::auth::{AgentId, AuthContext};
 use crate::error::{AppError, AppResult};
 use crate::models::agent::Agent;
 use crate::models::common::{ApiResponse, NotificationMode, NotificationPayload};
@@ -64,9 +64,12 @@ pub async fn get_agent_inventory(
 
 pub async fn add_item_to_agent_inventory(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
     Json(payload): Json<AddInventoryItemRequest>,
 ) -> AppResult<Json<InventoryItem>> {
+    auth.ensure_agent(&agent_id)?;
+
     let mut tx = state.pool().begin().await?;
 
     let agent_location = sqlx::query_scalar::<_, String>(
@@ -131,9 +134,12 @@ pub async fn add_item_to_agent_inventory(
 
 pub async fn remove_item_from_agent_inventory(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
     Json(payload): Json<RemoveInventoryItemRequest>,
 ) -> AppResult<Json<InventoryItem>> {
+    auth.ensure_agent(&agent_id)?;
+
     let mut tx = state.pool().begin().await?;
 
     let agent_location = sqlx::query_scalar::<_, String>(
@@ -196,9 +202,12 @@ pub async fn remove_item_from_agent_inventory(
 
 pub async fn transfer_item_between_agents(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(from_agent_id): Path<String>,
     Json(payload): Json<TransferItemRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
+    auth.ensure_agent(&from_agent_id)?;
+
     if from_agent_id == payload.to_agent_id {
         return Err(AppError::BadRequest(
             "source and destination agents must be different".to_string(),
@@ -322,7 +331,9 @@ pub async fn use_item(
     Json(payload): Json<UseItemRequest>,
 ) -> AppResult<Json<ApiResponse<Agent>>> {
     if payload.quantity <= 0 {
-        return Err(AppError::BadRequest("quantity must be positive".to_string()));
+        return Err(AppError::BadRequest(
+            "quantity must be positive".to_string(),
+        ));
     }
 
     let mut tx = state.pool().begin().await?;
@@ -344,9 +355,10 @@ pub async fn use_item(
 
     let use_quantity = payload.quantity as i16;
     if item.quantity < use_quantity {
-        return Err(AppError::BadRequest(
-            format!("not enough quantity (have {}, requested {})", item.quantity, use_quantity)
-        ));
+        return Err(AppError::BadRequest(format!(
+            "not enough quantity (have {}, requested {})",
+            item.quantity, use_quantity
+        )));
     }
 
     // Apply vital adjustments if this is a consumable
@@ -427,7 +439,10 @@ pub async fn use_item(
     .bind("item.used")
     .bind(&agent_id)
     .bind(&agent.current_location_id)
-    .bind(format!("Agent {} used {} x{}", agent_id, item.name, use_quantity))
+    .bind(format!(
+        "Agent {} used {} x{}",
+        agent_id, item.name, use_quantity
+    ))
     .bind(
         serde_json::json!({
             "item_id": item.id,

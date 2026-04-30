@@ -34,6 +34,8 @@ node .\lcity\bin\lcity.mjs health_check
 - `use_item --item-id <id> --quantity <n>` — consume stackable items, adjusts vitals
 - `economy_update --amount-cents <n> [--reason "<text>"]` — credit (positive) or debit (negative) agent balance
 - `board_read`, `board_posts`, `board_post --text`, `board_delete --post-id`, `board_clear`
+- `create_agent_token --agent-id <id> [--label <text>]`, `list_agent_tokens --agent-id <id>`, `revoke_agent_token --token-id <id>` — admin token management using `SIM_API_KEY`
+- `register_token --world <url> --agent-id <id> --token <token>`, `whoami` — hosted-world bearer auth setup
 - `current_intention`, `list_intentions`
 - `set_intention --summary <text> --reason <text> [--expected-location-id <id>] [--expected-action <text>]`
 - `update_intention --intention-id <id> [--summary <text>] [--reason <text>] [--expected-location-id <id>] [--expected-action <text>]`
@@ -74,6 +76,19 @@ $env:SIM_API_KEY="devkey"
 # or one-off CLI flag
 node .\lcity\bin\lcity.mjs --sim-key devkey board_read
 ```
+
+Hosted-world bearer token options:
+
+```powershell
+# register a token locally; writes .lcity/api_base, .lcity/agent_id, and .lcity/agent_token
+node .\lcity\bin\lcity.mjs register_token --world https://smallville.example.com --agent-id eddy_lin --token lcity_agent_...
+
+# or one-off env var / flag
+$env:LCITY_AGENT_TOKEN="lcity_agent_..."
+node .\lcity\bin\lcity.mjs --api-base https://smallville.example.com/api --agent-token $env:LCITY_AGENT_TOKEN whoami
+```
+
+When an agent token is present, mutating commands send `Authorization: Bearer <token>` instead of `x-sim-key` / `x-agent-id`. Local/admin workflows can keep using `SIM_API_KEY`.
 
 Output is always JSON:
 
@@ -116,7 +131,7 @@ const COMMANDS = {
 
 - **route** – string or `(ctx, options) => string`. Use the helper to compute dynamic URLs.
 - **method** – defaults to `GET`.
-- **requiresAgent** – automatically injects `x-agent-id` header when true.
+- **requiresAgent** – in local/admin mode, injects `x-agent-id`; in hosted token mode, bearer auth resolves the agent server-side.
 - **requireSimKey** – set to `false` for public endpoints (defaults to true).
 - **buildBody(options, ctx)** – optional function to construct the JSON body from CLI flags.
 - **handler(ctx, options)** – optional fully custom handler for advanced flows (`move_to_agent`, `daemon`, `lettabot_notify` use this).
@@ -201,5 +216,3 @@ lcity lettabot_notify --message "Broadcast" --agent-id sam_moore
 ```
 
 Under the hood, the CLI posts to the local daemon (`/notify`), which converts the request into a normalized interrupt and dispatches it through `interruptAgent(...)`. The current transport adapter then uses your `LETTABOT_API_KEY` + base URL to call `/v1/chat/completions`.
-
-
