@@ -1,4 +1,4 @@
-import { Agent, AgentIntention, ApiResponse, BootstrapSnapshot, Location, SimEvent, WorldEventEnvelope, WorldTime } from "@/types/world";
+import { Agent, AgentIntention, ApiResponse, BootstrapSnapshot, Location, SimEvent, TownPulse, WorldEventEnvelope, WorldTime } from "@/types/world";
 
 function getApiBase() {
   if (process.env.NEXT_PUBLIC_API_URL) {
@@ -36,6 +36,11 @@ export async function fetchWorldTime(): Promise<WorldTime> {
   return fetchJson<WorldTime>("/world/time");
 }
 
+export async function fetchTownPulse(): Promise<TownPulse> {
+  const response = await fetchJson<ApiResponse<TownPulse>>("/town/pulse");
+  return response.data;
+}
+
 function eventToEnvelope(event: SimEvent): WorldEventEnvelope {
   return {
     id: `event:${event.id}`,
@@ -58,15 +63,16 @@ export async function fetchRecentEvents(limit = 20): Promise<WorldEventEnvelope[
 }
 
 export async function fetchBootstrapSnapshot(): Promise<BootstrapSnapshot> {
-  const [agents, currentIntentions, locations, worldTime, recentEvents] = await Promise.all([
+  const [agents, currentIntentions, locations, worldTime, townPulse, recentEvents] = await Promise.all([
     fetchAgents(),
     fetchCurrentIntentions(),
     fetchLocations(),
     fetchWorldTime(),
+    fetchTownPulse(),
     fetchRecentEvents(),
   ]);
 
-  return { agents, currentIntentions, locations, worldTime, recentEvents };
+  return { agents, currentIntentions, locations, worldTime, townPulse, recentEvents };
 }
 
 export function getWsUrl() {

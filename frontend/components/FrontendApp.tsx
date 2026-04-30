@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { EventFeed } from "@/components/EventFeed";
 import { PhaserMap } from "@/components/PhaserMap";
+import { TownPulsePanel } from "@/components/TownPulsePanel";
 import { fetchBootstrapSnapshot, getWsUrl } from "@/lib/api";
 import { initialSimState, simReducer } from "@/lib/sim-store";
 import { connectWorldEvents } from "@/lib/ws-client";
@@ -97,6 +98,8 @@ export function FrontendApp() {
             </div>
           </div>
         </section>
+
+        <TownPulsePanel pulse={state.townPulse} />
 
         {state.loading ? <div className="loading">Bootstrapping world snapshot...</div> : null}
         {state.error ? <div className="error-box">{state.error}</div> : null}

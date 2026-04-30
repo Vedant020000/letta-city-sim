@@ -8,5 +8,6 @@ pub mod jobs;
 pub mod locations;
 pub mod objects;
 pub mod pathfind;
+pub mod pulse;
 pub mod sleep;
 pub mod world;

@@ -24,6 +24,7 @@ Implemented so far:
 - Objects API (`GET /locations/:location_id/objects`, `PATCH /objects/:id`)
 - Events API (`GET /events`, `POST /events`)
 - World time API (`GET /world/time`)
+- Town pulse API (`GET /town/pulse`) for “what is happening today?” snapshots
 - Canonical QA checklist in `TESTING.md`
 - Community contribution board scaffold in `townhall/`
 
@@ -97,6 +98,7 @@ curl.exe http://localhost:3001/jobs
 curl.exe "http://localhost:3001/pathfind?from=lin_bedroom&to=hobbs_cafe_seating"
 curl.exe http://localhost:3001/board
 curl.exe http://localhost:3001/world/time
+curl.exe http://localhost:3001/town/pulse
 ```
 
 For full manual validation, use `TESTING.md`.

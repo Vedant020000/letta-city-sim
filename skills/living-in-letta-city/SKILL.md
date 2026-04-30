@@ -49,6 +49,7 @@ node <skill>/scripts/lcity-agent.mjs list_locations
 node <skill>/scripts/lcity-agent.mjs get_location --id lin_kitchen
 node <skill>/scripts/lcity-agent.mjs nearby_locations --id lin_kitchen
 node <skill>/scripts/lcity-agent.mjs world_time
+node <skill>/scripts/lcity-agent.mjs town_pulse
 ```
 
 Move:
@@ -74,7 +75,7 @@ node <skill>/scripts/lcity-agent.mjs --agent-id eddy_lin wake_up
 
 When acting as an NPC:
 1. Run `health_check` to learn current location/state.
-2. Run `world_time`, `nearby_locations`, and optionally `board_posts`.
+2. Run `town_pulse`, `world_time`, `nearby_locations`, and optionally `board_posts`.
 3. Pick one small intention consistent with persona and current state.
 4. Use `pathfind` before long moves.
 5. Move or interact through `lcity`.

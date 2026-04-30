@@ -23,7 +23,7 @@ node .\lcity\bin\lcity.mjs health_check
 - `move_to_agent --target-agent-id`
 - `list_locations`, `get_location --id`, `nearby_locations --id`
 - `pathfind --from --to`
-- `world_time`
+- `world_time`, `town_pulse`
 - `sleep` — if the current location has exactly one usable bed, set the agent to sleeping and occupy that bed
 - `wake_up` — exit sleep state and clear the occupied bed marker
 - `list_inventory`
@@ -88,6 +88,7 @@ All commands are designed for tool-calling and return machine-readable JSON.
 Agents should use intentions for meaningful multi-step action sequences:
 
 ```powershell
+lcity town_pulse
 lcity current_intention
 lcity set_intention --summary "Find old jazz sheet music" --reason "I want something new to practice tonight" --expected-location-id oak_classroom_a --expected-action research_archive
 lcity move_to --location-id oak_classroom_a
