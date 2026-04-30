@@ -178,6 +178,8 @@ pub async fn update_agent_intention(
     .await?
     .ok_or(AppError::NotFound)?;
 
+    let existing_was_active = existing.status == ACTIVE_STATUS;
+
     let summary = match payload.summary {
         Some(value) => required_text(value, "summary")?,
         None => existing.summary,
@@ -201,6 +203,10 @@ pub async fn update_agent_intention(
     } else {
         Some(Utc::now())
     };
+
+    if status == ACTIVE_STATUS && !existing_was_active {
+        ensure_no_other_active_intention(&mut tx, &path.id, &path.intention_id).await?;
+    }
 
     let updated = sqlx::query_as::<_, AgentIntention>(
         r#"
@@ -312,6 +318,36 @@ async fn ensure_agent_exists_for_update(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(AppError::NotFound)
+}
+
+async fn ensure_no_other_active_intention(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    agent_id: &str,
+    current_intention_id: &str,
+) -> AppResult<()> {
+    let active_exists = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM agent_intentions
+            WHERE agent_id = $1
+              AND status = 'active'
+              AND id <> $2
+        )
+        "#,
+    )
+    .bind(agent_id)
+    .bind(current_intention_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    if active_exists {
+        return Err(AppError::BadRequest(
+            "agent already has an active intention".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 async fn insert_intention_event(
