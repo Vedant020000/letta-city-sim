@@ -13,6 +13,7 @@ These guides are the practical starting point for community contributors.
 - `adding-jobs.md` — add town jobs, meta roles, and seeded assignments safely
 - `adding-items-and-consumables.md` — add content packs for items and consumables
 - `agent-auth.md` — local admin auth vs hosted bearer-token auth for agents
+- `deploying-to-railway.md` — create a public Railway deployment that auto-redeploys from GitHub `main`
 - `public-railway-instance.md` — how to use the shared hosted Railway world safely
 - `playtesting.md` — run bots, collect evidence, and report useful findings
 

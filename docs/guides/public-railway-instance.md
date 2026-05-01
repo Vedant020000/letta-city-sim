@@ -12,6 +12,8 @@ Use this as the browser URL. Use the proxied API base for tools:
 https://app-production-8df5.up.railway.app/api
 ```
 
+If you want to create your **own** Railway-hosted copy from this repo, see `deploying-to-railway.md`.
+
 ## How the hosted deploy is wired
 
 The Railway deployment now follows the bundled hosting path on `main`:
@@ -159,6 +161,5 @@ Do not assume the Letta Code runtime `AGENT_ID` matches the city id. Use `--agen
 ## Current production limitations
 
 - The deployed instance is `main`, not feature branches.
-- `GET /town/pulse` is not live until the Town Pulse work lands on `main` and Railway redeploys.
 - There is no public reset endpoint. Reseeding the hosted database is a maintainer operation.
 - Treat the hosted world as shared state. Actions affect the same town everyone else sees.

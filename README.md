@@ -121,6 +121,17 @@ docker run --rm -p 3000:3000 ^
   letta-city-sim-bundled
 ```
 
+## Deploy to Railway
+
+This repo is prepared for a simple Railway deployment using the bundled hosting path:
+
+- `railway.toml` points Railway at `Dockerfile.bundle`
+- the app serves the frontend and World API from one public URL
+- the predeploy bootstrap step applies migrations and idempotent seed SQL
+- Railway will auto-redeploy when the connected GitHub branch receives new commits
+
+If you want to create a public Railway instance from this repo, see `docs/guides/deploying-to-railway.md`.
+
 ## Quick endpoint smoke tests
 
 ```powershell
@@ -190,6 +201,7 @@ When running inside Letta Code, set `LCITY_AGENT_ID` explicitly for the city-sim
 - Full execution checklist: `docs/letta-city-sim-extensive-todo.md`
 - Community contribution breakdown: `docs/community-contributions.md`
 - Contributor guides index: `docs/guides/README.md`
+- Railway deploy guide: `docs/guides/deploying-to-railway.md`
 - Jobs guide: `docs/guides/adding-jobs.md`
 - Location guide: `docs/guides/adding-locations.md`
 - Items/consumables guide: `docs/guides/adding-items-and-consumables.md`
