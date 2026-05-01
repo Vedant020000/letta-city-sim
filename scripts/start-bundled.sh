@@ -6,6 +6,24 @@ set -euo pipefail
 
 APP_PORT="${PORT:-3000}"
 API_PORT="${WORLD_API_PORT:-3001}"
+DB_WAIT_ATTEMPTS="${DB_WAIT_ATTEMPTS:-60}"
+DB_WAIT_SECONDS="${DB_WAIT_SECONDS:-2}"
+
+wait_for_db() {
+  local attempt=1
+  while [[ "${attempt}" -le "${DB_WAIT_ATTEMPTS}" ]]; do
+    if psql "${DATABASE_URL}" -X -v ON_ERROR_STOP=1 -c "SELECT 1;" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    echo "Waiting for database (${attempt}/${DB_WAIT_ATTEMPTS})..."
+    sleep "${DB_WAIT_SECONDS}"
+    attempt=$((attempt + 1))
+  done
+
+  echo "Database did not become ready in time." >&2
+  exit 1
+}
 
 cleanup() {
   if [[ -n "${FRONTEND_PID:-}" ]]; then
@@ -17,6 +35,9 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+echo "Checking database connectivity..."
+wait_for_db
 
 echo "Starting bundled world-api on port ${API_PORT}..."
 PORT="${API_PORT}" /app/bin/world-api &

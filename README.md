@@ -50,16 +50,16 @@ cargo run
 
 > Keep `.env` synced with `.env.example`. Never commit real secrets.
 
-## Optional bundled Docker image
+## Bundled Docker hosting stack
 
-There is now an optional bundled deployment/demo path that packages:
+There is now a bundled deployment path that packages:
 
 - `world-api`
 - `frontend`
 
 into a single image with **one public frontend port**. The frontend proxies API and websocket traffic internally to the bundled world-api.
 
-This is meant for demos/deployment convenience, not as the preferred local workflow on Vedant's machine.
+This is the easiest way to host the sim behind **one public port** while keeping Postgres internal to the Docker network.
 
 ### Build the bundled image
 
@@ -67,7 +67,51 @@ This is meant for demos/deployment convenience, not as the preferred local workf
 docker build -f Dockerfile.bundle -t letta-city-sim-bundled .
 ```
 
-### Run against an existing Postgres database
+### Host the full sim stack
+
+The compose stack starts:
+
+- `db` - Postgres with a named persistent volume
+- `db-init` - a one-shot bootstrap step that applies migrations and idempotent seed SQL
+- `app` - the bundled frontend + world-api image on one public port
+
+```powershell
+$env:SIM_API_KEY="change_me"
+docker compose -f docker-compose.bundle.yml up --build -d
+```
+
+Then open:
+
+- `http://localhost:3000` - bundled frontend
+- `http://localhost:3000/api/health` - world-api health through the frontend proxy
+
+Useful overrides:
+
+```powershell
+$env:SIM_API_KEY="change_me"
+$env:POSTGRES_PASSWORD="change_me_too"
+$env:PUBLIC_PORT="3000"
+docker compose -f docker-compose.bundle.yml up --build -d
+```
+
+Notes:
+
+- the Postgres container is **not** published publicly by default
+- migrations are tracked in `schema_migrations`
+- seed files are re-applied on bootstrap but are written idempotently with `ON CONFLICT`
+- the database data lives in the named Docker volume `pgdata_bundle`
+
+### Run the bundled app against an existing Postgres database
+
+If you already have Postgres elsewhere, run the bootstrap step once and then start the bundled app:
+
+```powershell
+docker run --rm ^
+  -e DATABASE_URL="postgres://sim:sim_dev_password@host.docker.internal:5432/letta_city_sim" ^
+  letta-city-sim-bundled /app/scripts/db-bootstrap.sh
+```
+
+Then start the app:
 
 ```powershell
 docker run --rm -p 3000:3000 ^
@@ -75,18 +119,6 @@ docker run --rm -p 3000:3000 ^
   -e SIM_API_KEY="dev_key_change_me" ^
   letta-city-sim-bundled
 ```
-
-This expects the target database to already have the current migrations and seed data applied.
-
-### Demo compose path
-
-For a one-command demo stack with a separate Postgres service, use:
-
-```powershell
-docker compose -f docker-compose.bundle.yml up --build
-```
-
-That compose file initializes Postgres with the current migrations + seed SQL and serves the bundled app on `http://localhost:3000`.
 
 ## Quick endpoint smoke tests
 
