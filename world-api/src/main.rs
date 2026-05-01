@@ -44,6 +44,7 @@ use routes::locations::{get_location_by_id, get_nearby_locations, list_locations
 use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
 use routes::sleep::{start_sleep, wake_up};
+use routes::tokens::{create_agent_token, list_agent_tokens, revoke_agent_token};
 use routes::world::get_world_time;
 use state::AppState;
 use ws_events::ws_events;
@@ -89,6 +90,9 @@ async fn main() -> AppResult<()> {
         .route("/agents", get(list_agents))
         .route("/agents/health", get(agent_health_check))
         .route("/agents/move", patch(move_agent_with_header))
+        .route("/admin/agents/:id/tokens", get(list_agent_tokens))
+        .route("/admin/agents/:id/tokens", post(create_agent_token))
+        .route("/admin/agent-tokens/:id", delete(revoke_agent_token))
         .route("/jobs", get(list_jobs))
         .route("/jobs/:id", get(get_job_by_id))
         .route("/jobs/:id/agents", get(list_job_agents))
@@ -129,7 +133,10 @@ async fn main() -> AppResult<()> {
                 .allow_methods(Any)
                 .allow_headers(Any),
         )
-        .layer(axum::middleware::from_fn(require_sim_key))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_sim_key,
+        ))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

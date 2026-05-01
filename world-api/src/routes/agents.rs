@@ -5,7 +5,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::AgentId;
+use crate::auth::{AgentId, AuthContext};
 use crate::error::AppError;
 use crate::error::AppResult;
 use crate::models::agent::Agent;
@@ -95,9 +95,12 @@ pub async fn get_agent_by_id(
 
 pub async fn update_agent_location(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
     Json(payload): Json<UpdateAgentLocationRequest>,
 ) -> AppResult<Json<ApiResponse<Agent>>> {
+    auth.ensure_agent(&agent_id)?;
+
     let updated_agent =
         perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
 
@@ -286,9 +289,12 @@ async fn perform_agent_location_update(
 
 pub async fn update_agent_activity(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
     Json(payload): Json<UpdateAgentActivityRequest>,
 ) -> AppResult<Json<Agent>> {
+    auth.ensure_agent(&agent_id)?;
+
     let mut tx = state.pool().begin().await?;
 
     let updated_agent = sqlx::query_as::<_, Agent>(
@@ -336,8 +342,11 @@ pub async fn update_agent_activity(
 
 pub async fn clear_agent_activity(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
 ) -> AppResult<Json<Agent>> {
+    auth.ensure_agent(&agent_id)?;
+
     let mut tx = state.pool().begin().await?;
 
     let updated_agent = sqlx::query_as::<_, Agent>(

@@ -31,6 +31,9 @@ node .\lcity\bin\lcity.mjs health_check
 - `list_agent_jobs [--agent-id <id>]`, `list_job_agents --job-id <id>`
 - `assign_job --job-id <id> [--agent-id <id>] [--primary] [--notes "<text>"]`
 - `remove_job --job-id <id> [--agent-id <id>]`
+- `create_agent_token --agent-id <id> [--label "<text>"]`
+- `list_agent_tokens --agent-id <id>`, `revoke_agent_token --token-id <id>`
+- `register_token --world <url> --agent-id <id> --token <token>`, `whoami`
 - `use_item --item-id <id> --quantity <n>` — consume stackable items, adjusts vitals
 - `economy_update --amount-cents <n> [--reason "<text>"]` — credit (positive) or debit (negative) agent balance
 - `board_read`, `board_posts`, `board_post --text`, `board_delete --post-id`, `board_clear`
@@ -73,6 +76,17 @@ $env:SIM_API_KEY="devkey"
 
 # or one-off CLI flag
 node .\lcity\bin\lcity.mjs --sim-key devkey board_read
+```
+
+Hosted bearer-token options:
+
+```powershell
+$env:LCITY_AGENT_TOKEN="lcity_agent_..."
+node .\lcity\bin\lcity.mjs --api-base https://your-hosted-world/api whoami
+
+# or persist the world + token locally
+node .\lcity\bin\lcity.mjs register_token --world https://your-hosted-world --agent-id eddy_lin --token lcity_agent_...
+node .\lcity\bin\lcity.mjs whoami
 ```
 
 Output is always JSON:

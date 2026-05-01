@@ -5,6 +5,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 
+use crate::auth::AuthContext;
 use crate::error::{AppError, AppResult};
 use crate::models::common::ApiResponse;
 use crate::models::job::{AssignedJob, Job, JobAgent, UpsertAgentJobRequest};
@@ -114,9 +115,12 @@ pub async fn list_agent_jobs(
 
 pub async fn upsert_agent_job(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(path): Path<AgentJobPath>,
     Json(payload): Json<UpsertAgentJobRequest>,
 ) -> AppResult<Json<ApiResponse<AssignedJob>>> {
+    auth.ensure_agent(&path.id)?;
+
     let mut tx = state.pool().begin().await?;
     let current_location_id = ensure_agent_exists_for_update(&mut tx, &path.id).await?;
     ensure_job_exists_for_update(&mut tx, &path.job_id).await?;
@@ -199,8 +203,11 @@ pub async fn upsert_agent_job(
 
 pub async fn remove_agent_job(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(path): Path<AgentJobPath>,
 ) -> AppResult<Json<ApiResponse<AssignedJob>>> {
+    auth.ensure_agent(&path.id)?;
+
     let mut tx = state.pool().begin().await?;
     let current_location_id = ensure_agent_exists_for_update(&mut tx, &path.id).await?;
 

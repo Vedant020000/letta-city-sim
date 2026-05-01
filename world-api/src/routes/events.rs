@@ -4,6 +4,7 @@ use axum::{
 };
 use chrono::Utc;
 
+use crate::auth::SimKey;
 use crate::error::{AppError, AppResult};
 use crate::models::event::{CreateEventRequest, EventsQuery, SimEvent};
 use crate::state::AppState;
@@ -39,6 +40,7 @@ pub async fn list_events(
 
 pub async fn create_event(
     State(state): State<AppState>,
+    _sim_key: SimKey,
     Json(payload): Json<CreateEventRequest>,
 ) -> AppResult<Json<SimEvent>> {
     if payload.r#type.trim().is_empty() {

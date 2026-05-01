@@ -5,6 +5,7 @@ use axum::{
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::auth::AuthContext;
 use crate::error::{AppError, AppResult};
 use crate::models::common::ApiResponse;
 use crate::models::intention::{
@@ -85,9 +86,12 @@ pub async fn get_current_agent_intention(
 
 pub async fn create_agent_intention(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
     Json(payload): Json<CreateAgentIntentionRequest>,
 ) -> AppResult<Json<ApiResponse<AgentIntention>>> {
+    auth.ensure_agent(&agent_id)?;
+
     let summary = required_text(payload.summary, "summary")?;
     let reason = required_text(payload.reason, "reason")?;
     let expected_action = optional_text(payload.expected_action);
@@ -157,9 +161,12 @@ pub async fn create_agent_intention(
 
 pub async fn update_agent_intention(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(path): Path<AgentIntentionPath>,
     Json(payload): Json<UpdateAgentIntentionRequest>,
 ) -> AppResult<Json<ApiResponse<AgentIntention>>> {
+    auth.ensure_agent(&path.id)?;
+
     let mut tx = state.pool().begin().await?;
     let current_location_id = ensure_agent_exists_for_update(&mut tx, &path.id).await?;
 

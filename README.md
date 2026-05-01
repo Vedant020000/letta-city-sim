@@ -135,10 +135,14 @@ For full manual validation, use `TESTING.md`.
 
 ## Authentication & CLI helper
 
-All mutating REST routes on `world-api` now require:
+All mutating REST routes on `world-api` now require auth.
 
-- `x-sim-key` header — matches `SIM_API_KEY` configured on the server.
-- `x-agent-id` header — ID (or `letta_agent_id`) of the acting NPC.
+Local/admin mode:
+
+- `x-sim-key` header - matches `SIM_API_KEY` configured on the server.
+- `x-agent-id` header - ID (or `letta_agent_id`) of the acting NPC for agent-scoped writes.
+
+For hosted/public-world work, there is now also a per-agent bearer-token flow. See `docs/guides/agent-auth.md` for the full route policy, token lifecycle, and `lcity register_token` workflow.
 
 Set the SIM key in your shell before running CLI commands:
 

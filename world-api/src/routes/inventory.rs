@@ -5,7 +5,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::auth::AgentId;
+use crate::auth::{AgentId, AuthContext};
 use crate::error::{AppError, AppResult};
 use crate::models::agent::Agent;
 use crate::models::common::{ApiResponse, NotificationMode, NotificationPayload};
@@ -64,9 +64,12 @@ pub async fn get_agent_inventory(
 
 pub async fn add_item_to_agent_inventory(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
     Json(payload): Json<AddInventoryItemRequest>,
 ) -> AppResult<Json<InventoryItem>> {
+    auth.ensure_agent(&agent_id)?;
+
     let mut tx = state.pool().begin().await?;
 
     let agent_location = sqlx::query_scalar::<_, String>(
@@ -131,9 +134,12 @@ pub async fn add_item_to_agent_inventory(
 
 pub async fn remove_item_from_agent_inventory(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(agent_id): Path<String>,
     Json(payload): Json<RemoveInventoryItemRequest>,
 ) -> AppResult<Json<InventoryItem>> {
+    auth.ensure_agent(&agent_id)?;
+
     let mut tx = state.pool().begin().await?;
 
     let agent_location = sqlx::query_scalar::<_, String>(
@@ -196,9 +202,12 @@ pub async fn remove_item_from_agent_inventory(
 
 pub async fn transfer_item_between_agents(
     State(state): State<AppState>,
+    auth: AuthContext,
     Path(from_agent_id): Path<String>,
     Json(payload): Json<TransferItemRequest>,
 ) -> AppResult<Json<serde_json::Value>> {
+    auth.ensure_agent(&from_agent_id)?;
+
     if from_agent_id == payload.to_agent_id {
         return Err(AppError::BadRequest(
             "source and destination agents must be different".to_string(),

@@ -10,7 +10,7 @@ Use the existing `lcity` CLI as the action surface. Do not reimplement World API
 ## Setup
 
 Required:
-- `SIM_API_KEY`, or pass `--sim-key`.
+- `SIM_API_KEY` for local/admin mode, or `LCITY_AGENT_TOKEN` / `--agent-token` for hosted bearer-token mode.
 - `LCITY_API_BASE`, or pass `--api-base`.
 - An agent identity for commands that require acting as an NPC.
 
@@ -27,6 +27,12 @@ Preferred wrapper:
 
 ```bash
 node <skill>/scripts/lcity-agent.mjs --repo ~/letta/letta-city-sim --api-base http://localhost:3002/api --sim-key dev_key_change_me --agent-id eddy_lin health_check
+```
+
+Hosted bearer-token mode:
+
+```bash
+node <skill>/scripts/lcity-agent.mjs --api-base https://your-hosted-world/api --agent-token lcity_agent_... --agent-id eddy_lin health_check
 ```
 
 If already inside the repo, `--repo` can be omitted. If `LCITY_AGENT_ID` is set, `--agent-id` can be omitted for commands that act as the current agent.

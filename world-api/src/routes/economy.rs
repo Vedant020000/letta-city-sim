@@ -1,11 +1,11 @@
 use axum::{
     Json,
-    extract::State,
+    extract::{Path, State},
 };
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::auth::AgentId;
+use crate::auth::AuthContext;
 use crate::error::{AppError, AppResult};
 use crate::models::agent::Agent;
 use crate::models::common::{ApiResponse, NotificationMode, NotificationPayload};
@@ -19,9 +19,12 @@ pub struct EconomyUpdateRequest {
 
 pub async fn update_economy(
     State(state): State<AppState>,
-    AgentId(agent_id): AgentId,
+    auth: AuthContext,
+    Path(agent_id): Path<String>,
     Json(payload): Json<EconomyUpdateRequest>,
 ) -> AppResult<Json<ApiResponse<Agent>>> {
+    auth.ensure_agent(&agent_id)?;
+
     if payload.amount_cents == 0 {
         return Err(AppError::BadRequest("amount cannot be zero".to_string()));
     }

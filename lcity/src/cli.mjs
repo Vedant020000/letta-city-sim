@@ -146,9 +146,15 @@ async function interruptAgent({ lettabotBase, lettabotKey, interrupt }) {
 }
 
 function parseCli(argv) {
+  const defaultApiBase = process.env.LCITY_API_BASE
+    || readOptionalFile(path.join(".lcity", "api_base"))
+    || "http://localhost:3001";
   const ctx = {
-    apiBase: process.env.LCITY_API_BASE || "http://localhost:3001",
+    apiBase: defaultApiBase,
     agentIdFile: path.join(".lcity", "agent_id"),
+    agentToken: process.env.LCITY_AGENT_TOKEN || "",
+    agentTokenFile: process.env.LCITY_AGENT_TOKEN_FILE || path.join(".lcity", "agent_token"),
+    apiBaseFile: path.join(".lcity", "api_base"),
     daemonDir: path.join(process.cwd(), ".lcity"),
     daemonPort: Number(process.env.LCITY_DAEMON_PORT || 48483),
     simKey: process.env.SIM_API_KEY || "",
@@ -159,6 +165,8 @@ function parseCli(argv) {
     const token = tokens.shift();
     if (token === "--api-base") ctx.apiBase = tokens.shift() || ctx.apiBase;
     if (token === "--agent-id-file") ctx.agentIdFile = tokens.shift() || ctx.agentIdFile;
+    if (token === "--agent-token") ctx.agentToken = tokens.shift() || ctx.agentToken;
+    if (token === "--agent-token-file") ctx.agentTokenFile = tokens.shift() || ctx.agentTokenFile;
     if (token === "--daemon-dir") ctx.daemonDir = tokens.shift() || ctx.daemonDir;
     if (token === "--daemon-port") ctx.daemonPort = Number(tokens.shift() || ctx.daemonPort);
     if (token === "--sim-key") ctx.simKey = tokens.shift() || ctx.simKey;
@@ -175,6 +183,15 @@ function parseCli(argv) {
   }
 
   return { ctx, command, options };
+}
+
+function readOptionalFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return "";
+    return fs.readFileSync(filePath, "utf8").trim();
+  } catch {
+    return "";
+  }
 }
 
 function required(options, key) {
@@ -224,6 +241,44 @@ function buildJobAssignmentBody(options) {
 function resolveSimKey(simKey) {
   if (simKey && String(simKey).trim()) return String(simKey).trim();
   throw new Error("missing SIM_API_KEY (set env or pass --sim-key)");
+}
+
+function resolveAgentToken(ctx, { required = false } = {}) {
+  const token = ctx.agentToken && String(ctx.agentToken).trim()
+    ? String(ctx.agentToken).trim()
+    : readOptionalFile(ctx.agentTokenFile);
+
+  if (token) return token;
+  if (required) {
+    throw new Error("missing LCITY_AGENT_TOKEN (set env, pass --agent-token, or run register_token)");
+  }
+  return "";
+}
+
+function buildAuthHeaders(ctx, { requiresAgent = false, requireSimKey = true, useAgentToken = true } = {}) {
+  const headers = {};
+  const token = useAgentToken ? resolveAgentToken(ctx) : "";
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+    return headers;
+  }
+
+  if (requireSimKey) {
+    headers["x-sim-key"] = resolveSimKey(ctx.simKey);
+  }
+  if (requiresAgent) {
+    headers["x-agent-id"] = resolveAgentId(ctx.agentIdFile);
+  }
+
+  return headers;
+}
+
+function normalizeWorldApiBase(world) {
+  const trimmed = String(world || "").trim().replace(/\/$/, "");
+  if (!trimmed) throw new Error("missing --world");
+  if (trimmed.endsWith("/api")) return trimmed;
+  return `${trimmed}/api`;
 }
 
 async function readRequestBody(req, limit = 4096) {
@@ -290,14 +345,12 @@ function printNotification(notification) {
   console.error(line);
 }
 
-async function callApi(ctx, route, { method = "GET", body, requiresAgent = false, requireSimKey = true } = {}) {
-  const headers = {};
-  if (requireSimKey) {
-    headers["x-sim-key"] = resolveSimKey(ctx.simKey);
-  }
-  if (requiresAgent) {
-    headers["x-agent-id"] = resolveAgentId(ctx.agentIdFile);
-  }
+async function callApi(
+  ctx,
+  route,
+  { method = "GET", body, requiresAgent = false, requireSimKey = true, useAgentToken = true } = {},
+) {
+  const headers = buildAuthHeaders(ctx, { requiresAgent, requireSimKey, useAgentToken });
 
   const { statusCode, data } = await requestJson(`${ctx.apiBase.replace(/\/$/, "")}${route}`, {
     method,
@@ -386,11 +439,35 @@ function buildIntentionBody(options, { status } = {}) {
   return body;
 }
 
+function registerToken(ctx, options) {
+  const apiBase = normalizeWorldApiBase(required(options, "world"));
+  const agentId = required(options, "agent-id");
+  const token = required(options, "token");
+
+  ensureDir(path.dirname(ctx.agentIdFile));
+  ensureDir(path.dirname(ctx.agentTokenFile));
+  ensureDir(path.dirname(ctx.apiBaseFile));
+  fs.writeFileSync(ctx.agentIdFile, `${agentId}\n`, "utf8");
+  fs.writeFileSync(ctx.agentTokenFile, `${token}\n`, "utf8");
+  fs.writeFileSync(ctx.apiBaseFile, `${apiBase}\n`, "utf8");
+
+  console.log(JSON.stringify({
+    ok: true,
+    data: {
+      api_base: apiBase,
+      agent_id: agentId,
+      agent_id_file: ctx.agentIdFile,
+      agent_token_file: ctx.agentTokenFile,
+    },
+  }));
+  return 0;
+}
+
 async function currentIntentionId(ctx) {
   const agentId = resolveAgentId(ctx.agentIdFile);
   const response = await requestJson(
     `${ctx.apiBase.replace(/\/$/, "")}/agents/${encodeURIComponent(agentId)}/intentions/current`,
-    { headers: { "x-sim-key": resolveSimKey(ctx.simKey) } },
+    { headers: buildAuthHeaders(ctx) },
   );
   if (!okStatus(response.statusCode)) {
     throw new Error(`failed to load current intention: ${JSON.stringify(response.data)}`);
@@ -539,6 +616,30 @@ const COMMANDS = {
       reason: options["reason"],
     }),
   },
+  create_agent_token: {
+    route: (_ctx, options) =>
+      `/admin/agents/${encodeURIComponent(required(options, "agent-id"))}/tokens`,
+    method: "POST",
+    useAgentToken: false,
+    buildBody: (options) => ({
+      label: options.label ? String(options.label) : undefined,
+    }),
+  },
+  list_agent_tokens: {
+    route: (_ctx, options) =>
+      `/admin/agents/${encodeURIComponent(required(options, "agent-id"))}/tokens`,
+    useAgentToken: false,
+  },
+  revoke_agent_token: {
+    route: (_ctx, options) =>
+      `/admin/agent-tokens/${encodeURIComponent(required(options, "token-id"))}`,
+    method: "DELETE",
+    useAgentToken: false,
+  },
+  whoami: {
+    route: "/agents/health",
+    requiresAgent: true,
+  },
 };
 
 async function executeDeclarativeCommand(ctx, def, options) {
@@ -560,11 +661,13 @@ async function executeDeclarativeCommand(ctx, def, options) {
   const method = def.method || "GET";
   const requiresAgent = Boolean(def.requiresAgent);
   const requireSimKey = def.requireSimKey !== false;
+  const useAgentToken = def.useAgentToken !== false;
 
   return callApi(ctx, route, {
     method,
     requiresAgent,
     requireSimKey,
+    useAgentToken,
     body,
   });
 }
@@ -602,7 +705,7 @@ async function handleMoveToAgent(ctx, options) {
 
 function usage() {
   return [
-    "Set SIM_API_KEY env (or use --sim-key) before invoking commands",
+    "Set SIM_API_KEY for local/admin mode, or LCITY_AGENT_TOKEN for hosted bearer-token mode",
     "lcity health_check",
     "lcity move_to --location-id lin_kitchen",
     "lcity move_to_agent --target-agent-id sam_moore",
@@ -625,6 +728,11 @@ function usage() {
     "lcity board_post --text \"Town hall at 6 PM\"",
     "lcity board_delete --post-id <id>",
     "lcity board_clear",
+    "lcity create_agent_token --agent-id eddy_lin [--label \"office hours\"]",
+    "lcity list_agent_tokens --agent-id eddy_lin",
+    "lcity revoke_agent_token --token-id <id>",
+    "lcity register_token --world http://localhost:3000 --agent-id eddy_lin --token lcity_agent_...",
+    "lcity whoami",
     "lcity current_intention",
     "lcity list_intentions",
     "lcity set_intention --summary \"Find sheet music\" --reason \"I want something new to practice\"",
@@ -1093,6 +1201,25 @@ export async function run(argv) {
         });
       case "board_clear":
         return callApi(ctx, "/board/clear", { method: "DELETE", requiresAgent: true });
+      case "create_agent_token":
+        return callApi(ctx, `/admin/agents/${encodeURIComponent(required(options, "agent-id"))}/tokens`, {
+          method: "POST",
+          body: { label: options.label ? String(options.label) : undefined },
+          useAgentToken: false,
+        });
+      case "list_agent_tokens":
+        return callApi(ctx, `/admin/agents/${encodeURIComponent(required(options, "agent-id"))}/tokens`, {
+          useAgentToken: false,
+        });
+      case "revoke_agent_token":
+        return callApi(ctx, `/admin/agent-tokens/${encodeURIComponent(required(options, "token-id"))}`, {
+          method: "DELETE",
+          useAgentToken: false,
+        });
+      case "register_token":
+        return registerToken(ctx, options);
+      case "whoami":
+        return callApi(ctx, "/agents/health", { requiresAgent: true });
       case "current_intention": {
         const agentId = resolveAgentId(ctx.agentIdFile);
         return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions/current`);
