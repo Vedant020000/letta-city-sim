@@ -82,11 +82,51 @@ export type SimEvent = {
   metadata: Record<string, unknown>;
 };
 
+export type BoardPost = {
+  id: string;
+  text: string;
+  created_at: string;
+};
+
+export type PulseAgent = {
+  agent_id: string;
+  name: string;
+  occupation: string;
+  current_location_id: string;
+  location_name: string;
+  state: string;
+  current_activity: string | null;
+  intention_summary: string | null;
+  intention_reason: string | null;
+  expected_location_id: string | null;
+  primary_job_id: string | null;
+  primary_job_name: string | null;
+  primary_job_kind: string | null;
+};
+
+export type BusyLocation = {
+  location_id: string;
+  name: string;
+  agent_count: number;
+  recent_event_count: number;
+};
+
+export type TownPulse = {
+  world_time: WorldTime;
+  headline: string;
+  highlights: string[];
+  active_agents: PulseAgent[];
+  board_posts: BoardPost[];
+  recent_events: SimEvent[];
+  busy_locations: BusyLocation[];
+};
+
 export type BootstrapSnapshot = {
   agents: Agent[];
   currentIntentions: AgentIntention[];
   locations: Location[];
   worldTime: WorldTime;
+  townPulse: TownPulse;
   recentEvents: WorldEventEnvelope[];
 };
 
@@ -97,6 +137,7 @@ export type SimState = {
   currentIntentions: AgentIntention[];
   locations: Location[];
   worldTime: WorldTime | null;
+  townPulse: TownPulse | null;
   recentEvents: WorldEventEnvelope[];
   connectionState: SimConnectionState;
   loading: boolean;

@@ -14,6 +14,7 @@ export const initialSimState: SimState = {
   currentIntentions: [],
   locations: [],
   worldTime: null,
+  townPulse: null,
   recentEvents: [],
   connectionState: "idle",
   loading: true,
@@ -66,6 +67,7 @@ export function simReducer(state: SimState, action: SimAction): SimState {
         currentIntentions: action.payload.currentIntentions,
         locations: action.payload.locations,
         worldTime: action.payload.worldTime,
+        townPulse: action.payload.townPulse,
         recentEvents: action.payload.recentEvents,
         loading: false,
         error: null,
@@ -78,6 +80,7 @@ export function simReducer(state: SimState, action: SimAction): SimState {
         currentIntentions: action.payload.currentIntentions,
         locations: action.payload.locations,
         worldTime: action.payload.worldTime,
+        townPulse: action.payload.townPulse,
         lastSnapshotAt: new Date().toISOString(),
       };
     case "bootstrap_failed":

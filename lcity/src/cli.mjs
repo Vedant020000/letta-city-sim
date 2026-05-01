@@ -530,6 +530,10 @@ const COMMANDS = {
     world_time: {
       route: "/world/time",
     },
+  town_pulse: {
+    route: "/town/pulse",
+    requireSimKey: false,
+  },
     sleep: {
       route: "/agents/sleep",
       method: "POST",
@@ -714,6 +718,7 @@ function usage() {
     "lcity nearby_locations --id lin_kitchen",
       "lcity pathfind --from lin_bedroom --to hobbs_cafe_seating",
       "lcity world_time",
+      "lcity town_pulse",
       "lcity sleep",
       "lcity wake_up",
       "lcity list_inventory",
@@ -1151,6 +1156,8 @@ export async function run(argv) {
       }
       case "world_time":
         return callApi(ctx, "/world/time");
+      case "town_pulse":
+        return callApi(ctx, "/town/pulse", { requireSimKey: false });
       case "list_inventory": {
         const agentId = resolveAgentId(ctx.agentIdFile);
         return callApi(ctx, `/inventory/${encodeURIComponent(agentId)}`);

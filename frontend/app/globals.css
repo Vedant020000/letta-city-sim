@@ -131,7 +131,7 @@ pre {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(360px, 0.9fr);
   gap: 20px;
-  align-items: start;
+  align-items: flex-start;
 }
 
 .column {
@@ -336,5 +336,146 @@ pre {
 
   .map-frame {
     height: 480px;
+  }
+}
+
+.pulse-panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.92));
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.pulse-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.eyebrow.compact {
+  margin-bottom: 6px;
+  font-size: 0.74rem;
+}
+
+.pulse-header h2 {
+  margin: 0;
+  font-size: clamp(1.2rem, 3vw, 1.8rem);
+}
+
+.pulse-time {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.pulse-time strong {
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.pulse-headline {
+  margin: 0;
+  color: #dbeafe;
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.pulse-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(240px, 0.7fr));
+  gap: 12px;
+}
+
+.pulse-card {
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.66);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.pulse-card h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pulse-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pulse-list.compact-list {
+  gap: 10px;
+}
+
+.pulse-item {
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.pulse-place,
+.pulse-signal,
+.pulse-agent {
+  display: grid;
+  gap: 3px;
+}
+
+.pulse-place span,
+.pulse-signal span,
+.pulse-agent span,
+.pulse-agent small {
+  color: var(--muted);
+}
+
+.pulse-signal strong {
+  color: #bfdbfe;
+  font-size: 0.86rem;
+}
+
+.pulse-agents {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pulse-agent {
+  border: 1px solid rgba(51, 65, 85, 0.78);
+  border-radius: 12px;
+  background: rgba(31, 41, 55, 0.54);
+  padding: 10px;
+  min-width: 0;
+}
+
+.pulse-agent strong,
+.pulse-agent span,
+.pulse-agent small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1100px) {
+  .pulse-grid,
+  .pulse-agents {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .pulse-header {
+    display: grid;
+  }
+
+  .pulse-time {
+    text-align: left;
   }
 }

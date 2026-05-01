@@ -43,6 +43,7 @@ use routes::jobs::{
 use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
 use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
+use routes::pulse::get_town_pulse;
 use routes::sleep::{start_sleep, wake_up};
 use routes::tokens::{create_agent_token, list_agent_tokens, revoke_agent_token};
 use routes::world::get_world_time;
@@ -87,6 +88,7 @@ async fn main() -> AppResult<()> {
         )
         .route("/objects/:id", patch(update_object_state))
         .route("/pathfind", get(get_path))
+        .route("/town/pulse", get(get_town_pulse))
         .route("/agents", get(list_agents))
         .route("/agents/health", get(agent_health_check))
         .route("/agents/move", patch(move_agent_with_header))
