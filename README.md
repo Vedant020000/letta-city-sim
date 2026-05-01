@@ -144,6 +144,8 @@ Local/admin mode:
 
 For hosted/public-world work, there is now also a per-agent bearer-token flow. See `docs/guides/agent-auth.md` for the full route policy, token lifecycle, and `lcity register_token` workflow.
 
+If you want to connect to the shared hosted Railway deployment, see `docs/guides/public-railway-instance.md`.
+
 Set the SIM key in your shell before running CLI commands:
 
 ```powershell
