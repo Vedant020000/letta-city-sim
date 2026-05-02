@@ -7,6 +7,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::agent::Agent;
 use crate::models::common::{ApiResponse, NotificationMode, NotificationPayload};
 use crate::models::object::WorldObject;
+use crate::routes::citizens::enqueue_citizen_wake_tx;
 use crate::state::AppState;
 use crate::ws_events::WorldEventEnvelope;
 
@@ -166,6 +167,40 @@ pub async fn start_sleep(
     .await?;
 
     let targets = location_targets(&mut tx, &agent.current_location_id, &agent.id).await?;
+    let mut citizen_signal_targets = Vec::new();
+
+    for target_agent_id in targets.iter().filter(|target| target.as_str() != agent.id.as_str()) {
+        let enqueued = enqueue_citizen_wake_tx(
+            &mut tx,
+            target_agent_id,
+            "world_event",
+            json!({
+                "kind": "sleep",
+                "ref": "agent.sleep.started",
+                "details": {
+                    "agent_id": agent.id,
+                    "bed_id": bed.id,
+                    "location_id": agent.current_location_id,
+                }
+            }),
+            format!("{} just went to sleep.", agent.name),
+            json!({
+                "event_type": "agent.sleep.started",
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "bed_id": bed.id,
+                "bed_name": bed.name,
+                "location_id": agent.current_location_id,
+            }),
+            json!([]),
+            true,
+        )
+        .await?;
+
+        if enqueued.should_signal {
+            citizen_signal_targets.push(target_agent_id.clone());
+        }
+    }
 
     let updated_agent = sqlx::query_as::<_, Agent>(
         r#"
@@ -179,6 +214,10 @@ pub async fn start_sleep(
     .await?;
 
     tx.commit().await?;
+
+    for target_agent_id in citizen_signal_targets {
+        let _ = state.citizen_signal_tx().send(target_agent_id);
+    }
 
     let _ = state.event_tx().send(WorldEventEnvelope::new(
         "agent.sleep.started",
@@ -296,6 +335,39 @@ pub async fn wake_up(
     .await?;
 
     let targets = location_targets(&mut tx, &agent.current_location_id, &agent.id).await?;
+    let mut citizen_signal_targets = Vec::new();
+
+    for target_agent_id in targets.iter().filter(|target| target.as_str() != agent.id.as_str()) {
+        let enqueued = enqueue_citizen_wake_tx(
+            &mut tx,
+            target_agent_id,
+            "world_event",
+            json!({
+                "kind": "sleep",
+                "ref": "agent.sleep.ended",
+                "details": {
+                    "agent_id": agent.id,
+                    "bed_id": bed_id,
+                    "location_id": agent.current_location_id,
+                }
+            }),
+            format!("{} just woke up.", agent.name),
+            json!({
+                "event_type": "agent.sleep.ended",
+                "agent_id": agent.id,
+                "agent_name": agent.name,
+                "bed_id": bed_id,
+                "location_id": agent.current_location_id,
+            }),
+            json!([]),
+            true,
+        )
+        .await?;
+
+        if enqueued.should_signal {
+            citizen_signal_targets.push(target_agent_id.clone());
+        }
+    }
 
     let updated_agent = sqlx::query_as::<_, Agent>(
         r#"
@@ -309,6 +381,10 @@ pub async fn wake_up(
     .await?;
 
     tx.commit().await?;
+
+    for target_agent_id in citizen_signal_targets {
+        let _ = state.citizen_signal_tx().send(target_agent_id);
+    }
 
     let _ = state.event_tx().send(WorldEventEnvelope::new(
         "agent.sleep.ended",

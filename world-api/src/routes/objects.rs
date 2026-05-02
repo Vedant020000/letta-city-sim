@@ -7,6 +7,7 @@ use chrono::Utc;
 use crate::auth::AgentId;
 use crate::error::{AppError, AppResult};
 use crate::models::object::{UpdateWorldObjectRequest, WorldObject};
+use crate::routes::citizens::enqueue_citizen_wake_tx;
 use crate::state::AppState;
 
 pub async fn list_objects_by_location(
@@ -88,7 +89,60 @@ pub async fn update_object_state(
     .execute(&mut *tx)
     .await?;
 
+    let mut citizen_signal_targets = Vec::new();
+    if let Some(location_id) = updated_object.location_id.clone() {
+        let targets: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT id
+            FROM agents
+            WHERE current_location_id = $1
+            ORDER BY id
+            "#,
+        )
+        .bind(&location_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        for target_agent_id in targets.iter().filter(|target| target.as_str() != actor_id.as_str()) {
+            let enqueued = enqueue_citizen_wake_tx(
+                &mut tx,
+                target_agent_id,
+                "world_event",
+                serde_json::json!({
+                    "kind": "object",
+                    "ref": "object.updated",
+                    "details": {
+                        "object_id": updated_object.id,
+                        "location_id": location_id,
+                        "actor_id": actor_id,
+                    }
+                }),
+                format!("{} changed at {}.", updated_object.name, location_id),
+                serde_json::json!({
+                    "event_type": "object.updated",
+                    "object_id": updated_object.id,
+                    "object_name": updated_object.name,
+                    "location_id": location_id,
+                    "state": updated_object.state,
+                    "actions": updated_object.actions,
+                    "actor_id": actor_id,
+                }),
+                serde_json::json!([]),
+                true,
+            )
+            .await?;
+
+            if enqueued.should_signal {
+                citizen_signal_targets.push(target_agent_id.clone());
+            }
+        }
+    }
+
     tx.commit().await?;
+
+    for target_agent_id in citizen_signal_targets {
+        let _ = state.citizen_signal_tx().send(target_agent_id);
+    }
 
     Ok(Json(updated_object))
 }

@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::auth::AgentId;
 use crate::error::{AppError, AppResult};
 use crate::models::board::{BoardPost, BoardStateWithIds, PublicBoardState};
+use crate::routes::citizens::enqueue_citizen_wake_tx;
 use crate::state::AppState;
 use crate::ws_events::WorldEventEnvelope;
 
@@ -102,6 +103,43 @@ pub async fn create_board_post(
     .into_iter()
     .collect();
 
+    let mut citizen_signal_targets = Vec::new();
+    for target_agent_id in targets.iter().filter(|target| target.as_str() != actor_id.as_str()) {
+        let enqueued = enqueue_citizen_wake_tx(
+            &mut tx,
+            target_agent_id,
+            "world_event",
+            serde_json::json!({
+                "kind": "board",
+                "ref": "board.posted",
+                "details": {
+                    "location_id": location_id,
+                    "post_id": post.id,
+                    "actor_id": actor_id,
+                }
+            }),
+            format!(
+                "A new notice board post appeared at {}. Check the structured wake payload if you want the post details.",
+                location_id
+            ),
+            serde_json::json!({
+                "event_type": "board.posted",
+                "location_id": location_id,
+                "post_id": post.id,
+                "text": post.text,
+                "actor_id": actor_id,
+                "created_at": post.created_at,
+            }),
+            serde_json::json!([]),
+            true,
+        )
+        .await?;
+
+        if enqueued.should_signal {
+            citizen_signal_targets.push(target_agent_id.clone());
+        }
+    }
+
     let _ = state.event_tx().send(WorldEventEnvelope::new(
         "board.posted",
         targets,
@@ -115,6 +153,10 @@ pub async fn create_board_post(
     ));
 
     tx.commit().await?;
+
+    for target_agent_id in citizen_signal_targets {
+        let _ = state.citizen_signal_tx().send(target_agent_id);
+    }
 
     Ok(Json(post))
 }

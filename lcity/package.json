@@ -1,14 +1,20 @@
 {
   "name": "letta-city-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "bin": {
-    "lcity": "./bin/lcity.mjs"
+    "lcity": "./bin/lcity.mjs",
+    "lcity-citizen": "./bin/lcity-citizen.mjs"
   },
   "files": [
     "bin",
     "src",
     "README.md"
-  ]
+  ],
+  "dependencies": {
+    "@letta-ai/letta-code-sdk": "^0.1.14",
+    "blessed": "^0.1.81",
+    "ws": "^8.18.3"
+  }
 }

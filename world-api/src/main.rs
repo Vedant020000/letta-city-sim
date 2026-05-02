@@ -20,6 +20,10 @@ mod ws_events;
 
 use auth::require_sim_key;
 use error::AppResult;
+use routes::actions::{
+    action_board_post, action_cook_food, action_move_to, action_set_activity, action_sleep,
+    get_tool_manifest,
+};
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
     update_agent_activity, update_agent_location,
@@ -27,6 +31,7 @@ use routes::agents::{
 use routes::board::{
     clear_board, create_board_post, delete_board_post, get_board_posts, get_public_board,
 };
+use routes::citizens::{citizen_action, create_test_citizen_wake, ws_citizen};
 use routes::economy::update_economy;
 use routes::events::{create_event, list_events};
 use routes::intentions::{
@@ -78,8 +83,15 @@ async fn main() -> AppResult<()> {
         .route("/events", post(create_event))
         .route("/intentions/current", get(list_current_intentions))
         .route("/ws/events", get(ws_events))
+        .route("/ws/citizen", get(ws_citizen))
         .route("/locations", get(list_locations))
         .route("/world/time", get(get_world_time))
+        .route("/v1/citizen/action", post(citizen_action))
+        .route("/actions/set_activity", post(action_set_activity))
+        .route("/actions/move_to", post(action_move_to))
+        .route("/actions/board_post", post(action_board_post))
+        .route("/actions/sleep", post(action_sleep))
+        .route("/actions/cook_food", post(action_cook_food))
         .route("/locations/:id", get(get_location_by_id))
         .route("/locations/:id/nearby", get(get_nearby_locations))
         .route(
@@ -94,11 +106,16 @@ async fn main() -> AppResult<()> {
         .route("/agents/move", patch(move_agent_with_header))
         .route("/admin/agents/:id/tokens", get(list_agent_tokens))
         .route("/admin/agents/:id/tokens", post(create_agent_token))
+        .route(
+            "/admin/agents/:id/citizen-wakes/test",
+            post(create_test_citizen_wake),
+        )
         .route("/admin/agent-tokens/:id", delete(revoke_agent_token))
         .route("/jobs", get(list_jobs))
         .route("/jobs/:id", get(get_job_by_id))
         .route("/jobs/:id/agents", get(list_job_agents))
         .route("/agents/:id", get(get_agent_by_id))
+        .route("/agents/:id/tool-manifest", get(get_tool_manifest))
         .route("/agents/:id/intentions", get(list_agent_intentions))
         .route("/agents/:id/intentions", post(create_agent_intention))
         .route("/agents/:id/jobs", get(list_agent_jobs))

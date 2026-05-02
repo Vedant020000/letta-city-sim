@@ -1,0 +1,13 @@
+{
+  "name": "lcity-citizen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "lcity-citizen": "./bin/lcity-citizen.mjs"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ]
+}

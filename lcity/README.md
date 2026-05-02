@@ -4,9 +4,21 @@ Shared command-line tool layer for all Letta agents in `letta-city-sim`.
 
 This package is structured to be published independently.
 
+`lcity` is now the **single local client package** for letta-city-sim.
+
+It contains:
+
+- the **admin/operator CLI**
+- the **citizen runtime namespace** via `lcity citizen ...`
+
 - entrypoint: `bin/lcity.mjs`
-- command implementation: `src/cli.mjs`
+- top-level dispatcher: `src/index.mjs`
 - package metadata: `package.json`
+
+Merged structure highlights:
+
+- `src/admin/` - admin/operator CLI
+- `src/citizen/` - citizen runtime, profiles, doctor, tools preview, TUI
 
 ## Run directly
 
@@ -44,6 +56,36 @@ node .\lcity\bin\lcity.mjs health_check
 - `fail_intention [--intention-id <id>] --outcome <text>`
 - `abandon_intention [--intention-id <id>] --outcome <text>`
 - `lettabot_notify --message "<text>" [--agent-id <id>]`
+
+## Citizen runtime commands
+
+Citizen mode now lives under a namespace instead of a separate package:
+
+```powershell
+lcity citizen run
+lcity citizen config show
+lcity citizen config validate
+lcity citizen doctor
+lcity citizen profile list
+lcity citizen profile init --name default
+lcity citizen profile use --name default
+lcity citizen tools preview
+```
+
+Citizen runtime implementation notes:
+
+- built on **`@letta-ai/letta-code-sdk`**
+- resumes the configured Letta agent per wake
+- fetches a **server-owned tool manifest** from the World API
+- registers only the currently relevant local world tools for that wake/context
+
+Canonical citizen config now lives under:
+
+```text
+.lcity/citizen/
+```
+
+Legacy `.lcity-citizen/` state is still read as a fallback during the transition.
 
 ## Use `.lcity/agent_id`
 

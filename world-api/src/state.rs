@@ -7,6 +7,7 @@ use crate::error::AppResult;
 pub struct AppState {
     pool: sqlx::Pool<sqlx::Postgres>,
     event_tx: broadcast::Sender<crate::ws_events::WorldEventEnvelope>,
+    citizen_signal_tx: broadcast::Sender<String>,
 }
 
 impl AppState {
@@ -18,8 +19,13 @@ impl AppState {
 
         // Size is small; if consumers lag they can drop messages.
         let (event_tx, _event_rx) = broadcast::channel(256);
+        let (citizen_signal_tx, _citizen_signal_rx) = broadcast::channel(256);
 
-        Ok(Self { pool, event_tx })
+        Ok(Self {
+            pool,
+            event_tx,
+            citizen_signal_tx,
+        })
     }
 
     pub fn pool(&self) -> &sqlx::Pool<sqlx::Postgres> {
@@ -28,5 +34,9 @@ impl AppState {
 
     pub fn event_tx(&self) -> &broadcast::Sender<crate::ws_events::WorldEventEnvelope> {
         &self.event_tx
+    }
+
+    pub fn citizen_signal_tx(&self) -> &broadcast::Sender<String> {
+        &self.citizen_signal_tx
     }
 }

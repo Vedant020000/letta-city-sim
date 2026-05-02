@@ -4,12 +4,14 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sqlx::{Postgres, Transaction};
 
 use crate::auth::{AgentId, AuthContext};
 use crate::error::AppError;
 use crate::error::AppResult;
 use crate::models::agent::Agent;
 use crate::models::common::{ApiResponse, NotificationMode, NotificationPayload};
+use crate::routes::citizens::enqueue_citizen_wake_tx;
 use crate::routes::pathfind::compute_shortest_path;
 use crate::state::AppState;
 
@@ -117,12 +119,13 @@ pub async fn move_agent_with_header(
     Ok(Json(result))
 }
 
-async fn perform_agent_location_update(
+pub async fn perform_agent_location_update(
     state: &AppState,
     agent_id: &str,
     location_id: &str,
 ) -> AppResult<ApiResponse<Agent>> {
     let mut tx = state.pool().begin().await?;
+    let mut citizen_signal_targets: Vec<String> = Vec::new();
 
     let previous_location_id: Option<String> = sqlx::query_scalar(
         r#"
@@ -153,6 +156,37 @@ async fn perform_agent_location_update(
 
             if !from_targets.contains(&agent_id.to_string()) {
                 from_targets.push(agent_id.to_string());
+            }
+
+            for target_agent_id in from_targets.iter().filter(|target| target.as_str() != agent_id) {
+                let enqueued = enqueue_citizen_wake_tx(
+                    &mut tx,
+                    target_agent_id,
+                    "world_event",
+                    serde_json::json!({
+                        "kind": "location",
+                        "ref": "location.exit",
+                        "details": {
+                            "agent_id": agent_id,
+                            "from_location_id": from_loc,
+                            "to_location_id": location_id,
+                        }
+                    }),
+                    format!("Agent {} just left {}.", agent_id, from_loc),
+                    serde_json::json!({
+                        "event_type": "location.exit",
+                        "agent_id": agent_id,
+                        "from_location_id": from_loc,
+                        "to_location_id": location_id,
+                    }),
+                    serde_json::json!([]),
+                    true,
+                )
+                .await?;
+
+                if enqueued.should_signal {
+                    citizen_signal_targets.push(target_agent_id.clone());
+                }
             }
 
             let _ = state
@@ -217,6 +251,45 @@ async fn perform_agent_location_update(
         to_targets.push(updated_agent.id.clone());
     }
 
+    for target_agent_id in to_targets
+        .iter()
+        .filter(|target| target.as_str() != updated_agent.id.as_str())
+    {
+        let enqueued = enqueue_citizen_wake_tx(
+            &mut tx,
+            target_agent_id,
+            "world_event",
+            serde_json::json!({
+                "kind": "location",
+                "ref": "location.enter",
+                "details": {
+                    "agent_id": updated_agent.id,
+                    "agent_name": updated_agent.name,
+                    "from_location_id": previous_location_id,
+                    "to_location_id": updated_agent.current_location_id,
+                }
+            }),
+            format!(
+                "{} just arrived at {}.",
+                updated_agent.name, updated_agent.current_location_id
+            ),
+            serde_json::json!({
+                "event_type": "location.enter",
+                "agent_id": updated_agent.id,
+                "agent_name": updated_agent.name,
+                "from_location_id": previous_location_id,
+                "to_location_id": updated_agent.current_location_id,
+            }),
+            serde_json::json!([]),
+            true,
+        )
+        .await?;
+
+        if enqueued.should_signal {
+            citizen_signal_targets.push(target_agent_id.clone());
+        }
+    }
+
     let _ = state
         .event_tx()
         .send(crate::ws_events::WorldEventEnvelope::new(
@@ -258,6 +331,10 @@ async fn perform_agent_location_update(
 
     tx.commit().await?;
 
+    for target_agent_id in citizen_signal_targets {
+        let _ = state.citizen_signal_tx().send(target_agent_id);
+    }
+
     let notification_mode = if travel_seconds <= 15 {
         NotificationMode::Instant
     } else {
@@ -295,8 +372,27 @@ pub async fn update_agent_activity(
 ) -> AppResult<Json<Agent>> {
     auth.ensure_agent(&agent_id)?;
 
-    let mut tx = state.pool().begin().await?;
+    let updated_agent = perform_agent_activity_update(&state, &agent_id, &payload.activity).await?;
 
+    Ok(Json(updated_agent))
+}
+
+pub async fn perform_agent_activity_update(
+    state: &AppState,
+    agent_id: &str,
+    activity: &str,
+) -> AppResult<Agent> {
+    let mut tx = state.pool().begin().await?;
+    let updated_agent = perform_agent_activity_update_in_tx(&mut tx, agent_id, activity).await?;
+    tx.commit().await?;
+    Ok(updated_agent)
+}
+
+pub async fn perform_agent_activity_update_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    agent_id: &str,
+    activity: &str,
+) -> AppResult<Agent> {
     let updated_agent = sqlx::query_as::<_, Agent>(
         r#"
         UPDATE agents
@@ -309,15 +405,15 @@ pub async fn update_agent_activity(
         RETURNING *
         "#,
     )
-    .bind(&payload.activity)
-    .bind(&agent_id)
-    .fetch_optional(&mut *tx)
+    .bind(activity)
+    .bind(agent_id)
+    .fetch_optional(&mut **tx)
     .await?
     .ok_or(AppError::NotFound)?;
 
     let description = format!(
         "Agent {} started activity: {}",
-        updated_agent.id, payload.activity
+        updated_agent.id, activity
     );
 
     sqlx::query(
@@ -332,12 +428,10 @@ pub async fn update_agent_activity(
     .bind(description)
     .bind("{}")
     .bind(Utc::now())
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
 
-    tx.commit().await?;
-
-    Ok(Json(updated_agent))
+    Ok(updated_agent)
 }
 
 pub async fn clear_agent_activity(

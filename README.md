@@ -4,6 +4,8 @@ Autonomous city simulation where each NPC is a Letta agent acting on its own clo
 
 - **world-api/** &mdash; Rust/Axum REST service exposing world state.
 - **frontend/** &mdash; Next.js 15 + Phaser 3 visualization.
+- **lcity/** &mdash; admin/operator CLI for the world API.
+- **lcity/** &mdash; local admin CLI plus `lcity citizen ...` runtime for bring-your-own Letta agents.
 - **townhall/** &mdash; Next.js community contribution board powered by GitHub Issues.
 - **seed/** &mdash; JSON (or scripts) that populate Smallville.
 - **docs/** &mdash; Product brief, extensive TODO, and archived plans.
@@ -28,7 +30,7 @@ Implemented so far:
 - Canonical QA checklist in `TESTING.md`
 - Community contribution board scaffold in `townhall/`
 
-Still pending: Letta SDK tool wiring, webhook bridge, conversations, websocket stream, and frontend map/UI.
+Still pending: richer citizen tools, webhook bridge, conversations, and frontend map/UI polish.
 
 ## Local development
 Dependencies:
@@ -168,6 +170,40 @@ node .\lcity\bin\lcity.mjs health_check
 
 The CLI reads the agent ID from `.lcity/agent_id` (see `lcity/README.md`) and automatically attaches both headers for every request. Use `--sim-key <value>` per command if you prefer not to export the env var.
 
+## Citizen harness
+
+Citizen runtime is now merged into `lcity/` under the `citizen` namespace.
+
+The merged citizen runtime now uses the **Letta Code SDK** and loads **manifest-driven local world tools** per wake instead of running a separate hand-rolled Letta client loop.
+
+Use this when you want to connect an existing Letta agent to the city using:
+
+- a maintainer-issued per-agent bearer token
+- the dedicated citizen websocket
+- per-wake inline `client_tools`
+- the v1 citizen RPC (`POST /v1/citizen/action`)
+
+Quick start:
+
+```powershell
+npm --prefix .\lcity install
+$env:LETTA_API_KEY="<your-letta-api-key>"
+$env:LETTA_AGENT_ID="agent-..."
+node .\lcity\bin\lcity.mjs citizen run --mode env
+```
+
+There is also now a profile-driven local mode:
+
+```powershell
+node .\lcity\bin\lcity.mjs citizen profile init --name default
+node .\lcity\bin\lcity.mjs citizen profile use --name default
+node .\lcity\bin\lcity.mjs citizen interactive
+```
+
+Use `config show`, `config validate`, and `doctor` to inspect the resolved citizen harness configuration before running it.
+
+See `lcity/README.md` for the merged CLI + citizen runtime flow.
+
 Sample write request (curl):
 
 ```powershell
@@ -206,4 +242,5 @@ When running inside Letta Code, set `LCITY_AGENT_ID` explicitly for the city-sim
 - Location guide: `docs/guides/adding-locations.md`
 - Items/consumables guide: `docs/guides/adding-items-and-consumables.md`
 - Playtesting guide: `docs/guides/playtesting.md`
+- Citizen harness runtime: `lcity/README.md` (`lcity citizen ...`)
 - Historical docs live under `docs/archive/`
