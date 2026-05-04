@@ -43,13 +43,13 @@ test("derives Railway bundled citizen websocket URL from /api base", () => {
     }, () => resolveRuntimeConfig({
       cwd,
       flags: {
-        apiBase: "https://app-production-8df5.up.railway.app/api",
+        apiBase: "https://hosted-world.example/api",
       },
     }));
 
     assert.equal(
       resolved.world.ws_url.value,
-      "wss://app-production-8df5.up.railway.app/ws/citizen",
+      "wss://hosted-world.example/ws/citizen",
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -65,7 +65,7 @@ test("supports explicit citizen websocket URL override", () => {
     }, () => resolveRuntimeConfig({
       cwd,
       flags: {
-        apiBase: "https://app-production-8df5.up.railway.app/api",
+        apiBase: "https://hosted-world.example/api",
       },
     }));
 
