@@ -21,8 +21,8 @@ mod ws_events;
 use auth::require_sim_key;
 use error::AppResult;
 use routes::actions::{
-    action_board_post, action_cook_food, action_move_to, action_set_activity, action_sleep,
-    get_tool_manifest,
+    action_board_post, action_cook_food, action_look_around, action_move_to, action_set_activity,
+    action_sleep, get_tool_manifest,
 };
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
@@ -92,6 +92,7 @@ async fn main() -> AppResult<()> {
         .route("/actions/board_post", post(action_board_post))
         .route("/actions/sleep", post(action_sleep))
         .route("/actions/cook_food", post(action_cook_food))
+        .route("/actions/look_around", post(action_look_around))
         .route("/locations/:id", get(get_location_by_id))
         .route("/locations/:id/nearby", get(get_nearby_locations))
         .route(

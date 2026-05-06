@@ -1,4 +1,4 @@
-use axum::{
+﻿use axum::{
     Json,
     extract::{Path, State},
 };
@@ -10,6 +10,8 @@ use crate::auth::AgentId;
 use crate::error::{AppError, AppResult};
 use crate::models::agent::Agent;
 use crate::models::common::ApiResponse;
+use crate::models::location::{Location, AdjacentLocation};
+use crate::models::object::WorldObject;
 use crate::routes::agents::{
     UpdateAgentLocationRequest, perform_agent_activity_update, perform_agent_activity_update_in_tx,
     perform_agent_location_update,
@@ -36,6 +38,22 @@ pub struct CookFoodActionResponse {
     pub quantity: i32,
     pub placeholder: bool,
     pub message: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct LookAroundAgent {
+    pub id: String,
+    pub name: String,
+    pub state: String,
+    pub current_activity: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LookAroundResponse {
+    pub location: Location,
+    pub nearby: Vec<AdjacentLocation>,
+    pub objects: Vec<WorldObject>,
+    pub agents_present: Vec<LookAroundAgent>,
 }
 
 #[derive(Debug, Serialize)]
@@ -172,6 +190,82 @@ pub async fn action_cook_food(
     })))
 }
 
+pub async fn action_look_around(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<LookAroundResponse>>> {
+    let agent_row = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT a.current_location_id, l.name
+        FROM agents a
+        JOIN locations l ON l.id = a.current_location_id
+        WHERE a.id = $1 OR a.letta_agent_id = $1
+        LIMIT 1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let location = sqlx::query_as::<_, Location>(
+        r#"
+        SELECT id, name, description, map_x, map_y
+        FROM locations
+        WHERE id = $1
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    let nearby = sqlx::query_as::<_, AdjacentLocation>(
+        r#"
+        SELECT l.id, l.name, l.description, l.map_x, l.map_y, la.travel_secs
+        FROM location_adjacency la
+        JOIN locations l ON l.id = la.to_id
+        WHERE la.from_id = $1
+        ORDER BY l.id
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_all(state.pool())
+    .await?;
+
+    let objects = sqlx::query_as::<_, WorldObject>(
+        r#"
+        SELECT id, name, location_id, state, actions
+        FROM world_objects
+        WHERE location_id = $1
+        ORDER BY name
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_all(state.pool())
+    .await?;
+
+    let agents_present = sqlx::query_as::<_, LookAroundAgent>(
+        r#"
+        SELECT id, name, state, current_activity
+        FROM agents
+        WHERE current_location_id = $1
+          AND id != $2
+        ORDER BY name
+        "#,
+    )
+    .bind(&agent_row.0)
+    .bind(&agent_id)
+    .fetch_all(state.pool())
+    .await?;
+
+    Ok(Json(ApiResponse::from(LookAroundResponse {
+        location,
+        nearby,
+        objects,
+        agents_present,
+    })))
+}
+
 pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
@@ -242,7 +336,7 @@ pub async fn get_tool_manifest(
         }
     }
 
-    let mut tools = vec![tool_set_activity(), tool_move_to()];
+    let mut tools = vec![tool_set_activity(), tool_move_to(), tool_look_around()];
     if has_sleep {
         tools.push(tool_sleep());
     }
@@ -300,6 +394,20 @@ fn tool_move_to() -> WorldToolDefinition {
                 }
             },
             "required": ["location_id"]
+        }),
+    }
+}
+
+fn tool_look_around() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "look_around".to_string(),
+        description: "Observe the current location, nearby locations, objects, and other agents present.".to_string(),
+        endpoint: "/actions/look_around".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
         }),
     }
 }
