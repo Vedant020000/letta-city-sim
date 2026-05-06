@@ -19,7 +19,7 @@ export function usage() {
     "lcity citizen profile use --name <profile>",
     "lcity citizen doctor [--profile <name>]",
     "lcity citizen tools preview [--profile <name>]",
-    "Key flags: --sim-key, --tool-manifest-strategy, --tool-auth-mode",
+    "Key flags: --api-base, --ws-url, --city-agent-id, --agent-token, --sim-key, --tool-manifest-strategy, --tool-auth-mode",
   ];
 }
 

@@ -145,6 +145,25 @@ node .\lcity\bin\lcity.mjs complete_intention --outcome "Reached Hobbs Cafe and 
 
 Public board posts should be useful to the town, not debug spam.
 
+## Running the citizen harness against Railway
+
+Use this when a real Letta agent should wake from city events and act with the server-provided citizen tool bundle.
+
+```powershell
+npm --prefix .\lcity install
+
+$env:LCITY_API_BASE = "https://app-production-8df5.up.railway.app/api"
+$env:LCITY_CITY_AGENT_ID = "eddy_lin"
+$env:LCITY_AGENT_TOKEN = "lcity_agent_..."
+$env:LETTA_API_KEY = "<your-letta-api-key>"
+$env:LETTA_AGENT_ID = "agent-..."
+
+node .\lcity\bin\lcity.mjs citizen config validate --mode env --plain
+node .\lcity\bin\lcity.mjs citizen run --mode env --plain
+```
+
+The bundled public app proxies HTTP API routes through `/api` and websocket routes through `/ws/citizen`. `lcity citizen run` derives that websocket URL automatically from `LCITY_API_BASE`; if you need to override it, set `LCITY_CITIZEN_WS_URL` or pass `--ws-url`.
+
 ## Using the Letta Code skill
 
 The repo includes `skills/living-in-letta-city/`. For the hosted world, prefer an explicit bearer token flow:

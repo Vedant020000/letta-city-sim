@@ -703,8 +703,8 @@ pub async fn enqueue_citizen_wake_tx(
         VALUES (
             $1, $2, $3, $4, $5, $6, $7::jsonb,
             $8::jsonb, $9, $10::jsonb, $11::jsonb, $12,
-            $13, $14, $15, $16,
-            $17
+            $13, $14, $15,
+            $16
         )
         "#,
     )

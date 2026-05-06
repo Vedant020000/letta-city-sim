@@ -79,6 +79,21 @@ Citizen runtime implementation notes:
 - fetches a **server-owned tool manifest** from the World API
 - registers only the currently relevant local world tools for that wake/context
 
+Minimal env-mode run:
+
+```powershell
+$env:LCITY_API_BASE="https://app-production-8df5.up.railway.app/api"
+$env:LCITY_CITY_AGENT_ID="eddy_lin"
+$env:LCITY_AGENT_TOKEN="lcity_agent_..."
+$env:LETTA_API_KEY="<your-letta-api-key>"
+$env:LETTA_AGENT_ID="agent-..."
+
+node .\lcity\bin\lcity.mjs citizen config validate --mode env --plain
+node .\lcity\bin\lcity.mjs citizen run --mode env --plain
+```
+
+If the derived websocket URL does not match the hosted world, override it with `LCITY_CITIZEN_WS_URL` or `--ws-url`. Bundled Railway deployments expose HTTP routes through `/api` and websocket routes through `/ws/citizen`.
+
 Canonical citizen config now lives under:
 
 ```text
@@ -258,5 +273,4 @@ lcity lettabot_notify --message "Broadcast" --agent-id sam_moore
 ```
 
 Under the hood, the CLI posts to the local daemon (`/notify`), which converts the request into a normalized interrupt and dispatches it through `interruptAgent(...)`. The current transport adapter then uses your `LETTABOT_API_KEY` + base URL to call `/v1/chat/completions`.
-
 

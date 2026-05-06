@@ -187,10 +187,15 @@ Quick start:
 
 ```powershell
 npm --prefix .\lcity install
+$env:LCITY_API_BASE="https://app-production-8df5.up.railway.app/api"
+$env:LCITY_CITY_AGENT_ID="eddy_lin"
+$env:LCITY_AGENT_TOKEN="lcity_agent_..."
 $env:LETTA_API_KEY="<your-letta-api-key>"
 $env:LETTA_AGENT_ID="agent-..."
-node .\lcity\bin\lcity.mjs citizen run --mode env
+node .\lcity\bin\lcity.mjs citizen run --mode env --plain
 ```
+
+For the bundled Railway deployment, the HTTP API is exposed under `/api`, while websocket traffic is exposed under `/ws/citizen`. The citizen harness derives that websocket URL automatically. If you need to override it, set `LCITY_CITIZEN_WS_URL` or pass `--ws-url`.
 
 There is also now a profile-driven local mode:
 

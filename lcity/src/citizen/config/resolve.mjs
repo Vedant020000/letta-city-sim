@@ -24,9 +24,10 @@ function normalizeApiBase(apiBase) {
 
 function wsUrlFromApiBase(apiBase) {
   const trimmed = normalizeApiBase(apiBase);
-  if (trimmed.startsWith("https://")) return `wss://${trimmed.slice("https://".length)}/ws/citizen`;
-  if (trimmed.startsWith("http://")) return `ws://${trimmed.slice("http://".length)}/ws/citizen`;
-  return `${trimmed}/ws/citizen`;
+  const publicOrigin = trimmed.endsWith("/api") ? trimmed.slice(0, -4) : trimmed;
+  if (publicOrigin.startsWith("https://")) return `wss://${publicOrigin.slice("https://".length)}/ws/citizen`;
+  if (publicOrigin.startsWith("http://")) return `ws://${publicOrigin.slice("http://".length)}/ws/citizen`;
+  return `${publicOrigin}/ws/citizen`;
 }
 
 function parsePositiveInteger(value, fallback) {
@@ -228,6 +229,22 @@ export function resolveRuntimeConfig({ flags = {}, cwd = process.cwd() } = {}) {
     cwd,
   });
 
+  const wsUrl = resolvedString({
+    flagValue: flags.wsUrl,
+    envName: "LCITY_CITIZEN_WS_URL",
+    profileValue: profileData.world?.ws_url,
+    filePath: "",
+    defaultValue: "",
+    label: "--ws-url",
+    cwd,
+  });
+  const resolvedWsUrl = wsUrl.present
+    ? wsUrl
+    : createResolvedValue({
+      value: wsUrlFromApiBase(apiBase.value),
+      source: `derived:${apiBase.source}`,
+    });
+
   const worldAuthProfile = profileData.world?.auth || {};
   const worldToolAuthProfile = profileData.world?.tool_auth || {};
 
@@ -333,7 +350,7 @@ export function resolveRuntimeConfig({ flags = {}, cwd = process.cwd() } = {}) {
     },
     world: {
       api_base: apiBase,
-      ws_url: createResolvedValue({ value: wsUrlFromApiBase(apiBase.value), source: `derived:${apiBase.source}` }),
+      ws_url: resolvedWsUrl,
       tool_manifest_strategy: resolvedString({
         flagValue: flags.toolManifestStrategy,
         envName: "LCITY_CITIZEN_TOOL_MANIFEST_STRATEGY",
