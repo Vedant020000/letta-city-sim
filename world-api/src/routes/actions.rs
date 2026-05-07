@@ -17,6 +17,10 @@ use crate::routes::agents::{
     perform_agent_location_update,
 };
 use crate::routes::board::{CreateBoardPostRequest, create_board_post};
+use crate::routes::conversations::{
+    AcceptInviteRequest, AcceptRequestRequest, JoinConversationRequest, SendMessageRequest,
+    SpeakToRequest,
+};
 use crate::routes::sleep::start_sleep;
 use crate::state::AppState;
 
@@ -266,6 +270,54 @@ pub async fn action_look_around(
     })))
 }
 
+pub async fn action_speak_to(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<SpeakToRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    crate::routes::conversations::action_speak_to(State(state), AgentId(agent_id), Json(payload)).await
+}
+
+pub async fn action_join_conversation(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<JoinConversationRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    crate::routes::conversations::action_join_conversation(State(state), AgentId(agent_id), Json(payload)).await
+}
+
+pub async fn action_leave_conversation(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<JoinConversationRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    crate::routes::conversations::action_leave_conversation(State(state), AgentId(agent_id), Json(payload)).await
+}
+
+pub async fn action_send_message(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<SendMessageRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    crate::routes::conversations::action_send_message(State(state), AgentId(agent_id), Json(payload)).await
+}
+
+pub async fn action_accept_join_request(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<AcceptRequestRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    crate::routes::conversations::action_accept_join_request(State(state), AgentId(agent_id), Json(payload)).await
+}
+
+pub async fn action_accept_invitation(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<AcceptInviteRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    crate::routes::conversations::action_accept_invitation(State(state), AgentId(agent_id), Json(payload)).await
+}
+
 pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
@@ -336,7 +388,34 @@ pub async fn get_tool_manifest(
         }
     }
 
-    let mut tools = vec![tool_set_activity(), tool_move_to(), tool_look_around()];
+    let mut has_active_conversation = false;
+    let mut has_location_conversations = false;
+
+    let active_conversations = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT conversation_id FROM conversation_participants
+        WHERE agent_id = $1 AND status = 'active' AND left_at IS NULL
+        LIMIT 1
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_optional(state.pool())
+    .await?;
+    has_active_conversation = active_conversations.is_some();
+
+    let location_conversations = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT id FROM conversations
+        WHERE location_id = $1 AND ended_at IS NULL
+        LIMIT 1
+        "#,
+    )
+    .bind(&agent_row.1)
+    .fetch_optional(state.pool())
+    .await?;
+    has_location_conversations = location_conversations.is_some();
+
+    let mut tools = vec![tool_set_activity(), tool_move_to(), tool_look_around(), tool_speak_to()];
     if has_sleep {
         tools.push(tool_sleep());
     }
@@ -345,6 +424,13 @@ pub async fn get_tool_manifest(
     }
     if has_cook || agent_row.2.to_lowercase().contains("cafe") {
         tools.push(tool_cook_food());
+    }
+    if has_active_conversation {
+        tools.push(tool_leave_conversation());
+        tools.push(tool_send_message());
+    }
+    if has_location_conversations {
+        tools.push(tool_join_conversation());
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -465,6 +551,128 @@ fn tool_cook_food() -> WorldToolDefinition {
                 }
             },
             "required": ["recipe_id"]
+        }),
+    }
+}
+
+fn tool_speak_to() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "speak_to".to_string(),
+        description: "Speak directly to another agent in the same location. Creates or continues a 1:1 conversation and sends a message. The target agent will be woken to respond.".to_string(),
+        endpoint: "/actions/speak_to".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "target_agent_id": {
+                    "type": "string",
+                    "description": "The agent ID of the person you want to speak to."
+                },
+                "message": {
+                    "type": "string",
+                    "description": "What you want to say."
+                }
+            },
+            "required": ["target_agent_id", "message"]
+        }),
+    }
+}
+
+fn tool_join_conversation() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "join_conversation".to_string(),
+        description: "Request to join an existing conversation at your current location. Current participants must approve your request.".to_string(),
+        endpoint: "/actions/join_conversation".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "The conversation ID to join."
+                }
+            },
+            "required": ["conversation_id"]
+        }),
+    }
+}
+
+fn tool_leave_conversation() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "leave_conversation".to_string(),
+        description: "Leave a conversation you are currently in.".to_string(),
+        endpoint: "/actions/leave_conversation".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "The conversation ID to leave."
+                }
+            },
+            "required": ["conversation_id"]
+        }),
+    }
+}
+
+fn tool_send_message() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "send_message".to_string(),
+        description: "Send a message in a conversation you have joined. All other active participants will be woken to read it.".to_string(),
+        endpoint: "/actions/send_message".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The message content."
+                }
+            },
+            "required": ["content"]
+        }),
+    }
+}
+
+fn tool_accept_join_request() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "accept_join_request".to_string(),
+        description: "Approve another agent's request to join a conversation you are in.".to_string(),
+        endpoint: "/actions/accept_join_request".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "The conversation ID."
+                },
+                "requester_agent_id": {
+                    "type": "string",
+                    "description": "The agent ID who requested to join."
+                }
+            },
+            "required": ["conversation_id", "requester_agent_id"]
+        }),
+    }
+}
+
+fn tool_accept_invitation() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "accept_invitation".to_string(),
+        description: "Accept an invitation to join a conversation.".to_string(),
+        endpoint: "/actions/accept_invitation".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "conversation_id": {
+                    "type": "string",
+                    "description": "The conversation ID to accept."
+                }
+            },
+            "required": ["conversation_id"]
         }),
     }
 }

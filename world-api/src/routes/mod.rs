@@ -2,6 +2,7 @@ pub mod actions;
 pub mod agents;
 pub mod board;
 pub mod citizens;
+pub mod conversations;
 pub mod economy;
 pub mod events;
 pub mod intentions;

@@ -21,8 +21,9 @@ mod ws_events;
 use auth::require_sim_key;
 use error::AppResult;
 use routes::actions::{
-    action_board_post, action_cook_food, action_look_around, action_move_to, action_set_activity,
-    action_sleep, get_tool_manifest,
+    action_accept_invitation, action_accept_join_request, action_board_post, action_cook_food,
+    action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
+    action_send_message, action_set_activity, action_sleep, action_speak_to, get_tool_manifest,
 };
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
@@ -52,6 +53,9 @@ use routes::pulse::get_town_pulse;
 use routes::sleep::{start_sleep, wake_up};
 use routes::tokens::{create_agent_token, list_agent_tokens, revoke_agent_token};
 use routes::world::get_world_time;
+use routes::conversations::{
+    get_conversation_detail, list_active_conversations,
+};
 use state::AppState;
 use ws_events::ws_events;
 
@@ -93,6 +97,14 @@ async fn main() -> AppResult<()> {
         .route("/actions/sleep", post(action_sleep))
         .route("/actions/cook_food", post(action_cook_food))
         .route("/actions/look_around", post(action_look_around))
+        .route("/actions/speak_to", post(action_speak_to))
+        .route("/actions/join_conversation", post(action_join_conversation))
+        .route("/actions/leave_conversation", post(action_leave_conversation))
+        .route("/actions/send_message", post(action_send_message))
+        .route("/actions/accept_join_request", post(action_accept_join_request))
+        .route("/actions/accept_invitation", post(action_accept_invitation))
+        .route("/conversations", get(list_active_conversations))
+        .route("/conversations/:id", get(get_conversation_detail))
         .route("/locations/:id", get(get_location_by_id))
         .route("/locations/:id/nearby", get(get_nearby_locations))
         .route(

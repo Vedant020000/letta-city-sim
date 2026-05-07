@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod board;
 pub mod common;
+pub mod conversation;
 pub mod event;
 pub mod intention;
 pub mod inventory;
