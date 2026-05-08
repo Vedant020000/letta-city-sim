@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, Query, State},
 };
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -309,7 +309,7 @@ pub async fn action_join_conversation(
     .fetch_optional(&mut *tx)
     .await?;
 
-    match existing.as_deref() {
+    match existing.flatten().as_deref() {
         Some("active") => {
             tx.commit().await?;
             return Ok(Json(ApiResponse::from(serde_json::json!({

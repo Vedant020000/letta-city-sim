@@ -388,9 +388,6 @@ pub async fn get_tool_manifest(
         }
     }
 
-    let mut has_active_conversation = false;
-    let mut has_location_conversations = false;
-
     let active_conversations = sqlx::query_scalar::<_, String>(
         r#"
         SELECT conversation_id FROM conversation_participants
@@ -401,7 +398,7 @@ pub async fn get_tool_manifest(
     .bind(&agent_row.0)
     .fetch_optional(state.pool())
     .await?;
-    has_active_conversation = active_conversations.is_some();
+    let has_active_conversation = active_conversations.is_some();
 
     let location_conversations = sqlx::query_scalar::<_, String>(
         r#"
@@ -413,7 +410,19 @@ pub async fn get_tool_manifest(
     .bind(&agent_row.1)
     .fetch_optional(state.pool())
     .await?;
-    has_location_conversations = location_conversations.is_some();
+    let has_location_conversations = location_conversations.is_some();
+
+    let pending_invites = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT conversation_id FROM conversation_participants
+        WHERE agent_id = $1 AND status = 'invited'
+        LIMIT 1
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_optional(state.pool())
+    .await?;
+    let has_pending_invites = pending_invites.is_some();
 
     let mut tools = vec![tool_set_activity(), tool_move_to(), tool_look_around(), tool_speak_to()];
     if has_sleep {
@@ -428,9 +437,13 @@ pub async fn get_tool_manifest(
     if has_active_conversation {
         tools.push(tool_leave_conversation());
         tools.push(tool_send_message());
+        tools.push(tool_accept_join_request());
     }
     if has_location_conversations {
         tools.push(tool_join_conversation());
+    }
+    if has_pending_invites {
+        tools.push(tool_accept_invitation());
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
