@@ -20,7 +20,7 @@ pub struct ConversationParticipant {
     pub joined_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct ConversationSummary {
     pub id: String,
     pub location_id: String,

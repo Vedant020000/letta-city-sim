@@ -193,8 +193,9 @@ pub async fn action_speak_to(
             a1.name,
             a2.state
         FROM agents a1
-        JOIN agents a2 ON a2.id = $2
-        WHERE a1.id = $1
+        JOIN agents a2 ON a2.id = $2 OR a2.letta_agent_id = $2
+        WHERE a1.id = $1 OR a1.letta_agent_id = $1
+        LIMIT 1
         "#,
     )
     .bind(&agent_id)
@@ -221,7 +222,7 @@ pub async fn action_speak_to(
     tx.commit().await?;
 
     // Wake the target agent
-    let _ = enqueue_citizen_wake_tx(
+    let enqueued = enqueue_citizen_wake_tx(
         &mut state.pool().begin().await?,
         &target_id,
         "conversation",
@@ -246,6 +247,9 @@ pub async fn action_speak_to(
         true,
     )
     .await?;
+    if enqueued.should_signal {
+        let _ = state.citizen_signal_tx().send(target_id.to_string());
+    }
 
     Ok(Json(ApiResponse::from(serde_json::json!({
         "conversation_id": conversation_id,
@@ -379,7 +383,7 @@ pub async fn action_join_conversation(
             .await?;
 
             for participant_id in active_participants {
-                let _ = enqueue_citizen_wake_tx(
+                let enqueued = enqueue_citizen_wake_tx(
                     &mut state.pool().begin().await?,
                     &participant_id,
                     "conversation",
@@ -403,6 +407,9 @@ pub async fn action_join_conversation(
                     true,
                 )
                 .await?;
+                if enqueued.should_signal {
+                    let _ = state.citizen_signal_tx().send(participant_id);
+                }
             }
 
             return Ok(Json(ApiResponse::from(serde_json::json!({
@@ -522,7 +529,7 @@ pub async fn action_send_message(
     .await?;
 
     for participant_id in other_participants {
-        let _ = enqueue_citizen_wake_tx(
+        let enqueued = enqueue_citizen_wake_tx(
             &mut state.pool().begin().await?,
             &participant_id,
             "conversation",
@@ -547,6 +554,9 @@ pub async fn action_send_message(
             true,
         )
         .await?;
+        if enqueued.should_signal {
+            let _ = state.citizen_signal_tx().send(participant_id);
+        }
     }
 
     Ok(Json(ApiResponse::from(serde_json::json!({
@@ -631,7 +641,7 @@ pub async fn action_accept_join_request(
     .fetch_one(state.pool())
     .await?;
 
-    let _ = enqueue_citizen_wake_tx(
+    let enqueued = enqueue_citizen_wake_tx(
         &mut state.pool().begin().await?,
         &requester_id,
         "conversation",
@@ -655,6 +665,9 @@ pub async fn action_accept_join_request(
         true,
     )
     .await?;
+    if enqueued.should_signal {
+        let _ = state.citizen_signal_tx().send(requester_id.to_string());
+    }
 
     Ok(Json(ApiResponse::from(serde_json::json!({
         "status": "accepted",
