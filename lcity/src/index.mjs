@@ -1,5 +1,6 @@
 import { run as runAdmin } from "./admin/index.mjs";
 import { run as runCitizen } from "./citizen/index.mjs";
+import { run as runTown } from "./town/index.mjs";
 
 export async function run(argv) {
   const tokens = Array.isArray(argv) ? [...argv] : [];
@@ -7,6 +8,10 @@ export async function run(argv) {
 
   if (command === "citizen") {
     return runCitizen(tokens.slice(1));
+  }
+
+  if (command === "town") {
+    return runTown(tokens.slice(1));
   }
 
   return runAdmin(tokens);
