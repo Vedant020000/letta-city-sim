@@ -222,8 +222,9 @@ pub async fn action_speak_to(
     tx.commit().await?;
 
     // Wake the target agent
+    let mut wake_tx = state.pool().begin().await?;
     let enqueued = enqueue_citizen_wake_tx(
-        &mut state.pool().begin().await?,
+        &mut wake_tx,
         &target_id,
         "conversation",
         serde_json::json!({
@@ -247,6 +248,7 @@ pub async fn action_speak_to(
         true,
     )
     .await?;
+    wake_tx.commit().await?;
     if enqueued.should_signal {
         let _ = state.citizen_signal_tx().send(target_id.to_string());
     }
@@ -383,8 +385,9 @@ pub async fn action_join_conversation(
             .await?;
 
             for participant_id in active_participants {
+                let mut wake_tx = state.pool().begin().await?;
                 let enqueued = enqueue_citizen_wake_tx(
-                    &mut state.pool().begin().await?,
+                    &mut wake_tx,
                     &participant_id,
                     "conversation",
                     serde_json::json!({
@@ -407,6 +410,7 @@ pub async fn action_join_conversation(
                     true,
                 )
                 .await?;
+                wake_tx.commit().await?;
                 if enqueued.should_signal {
                     let _ = state.citizen_signal_tx().send(participant_id);
                 }
@@ -529,8 +533,9 @@ pub async fn action_send_message(
     .await?;
 
     for participant_id in other_participants {
+        let mut wake_tx = state.pool().begin().await?;
         let enqueued = enqueue_citizen_wake_tx(
-            &mut state.pool().begin().await?,
+            &mut wake_tx,
             &participant_id,
             "conversation",
             serde_json::json!({
@@ -554,6 +559,7 @@ pub async fn action_send_message(
             true,
         )
         .await?;
+        wake_tx.commit().await?;
         if enqueued.should_signal {
             let _ = state.citizen_signal_tx().send(participant_id);
         }
@@ -641,8 +647,9 @@ pub async fn action_accept_join_request(
     .fetch_one(state.pool())
     .await?;
 
+    let mut wake_tx = state.pool().begin().await?;
     let enqueued = enqueue_citizen_wake_tx(
-        &mut state.pool().begin().await?,
+        &mut wake_tx,
         &requester_id,
         "conversation",
         serde_json::json!({
@@ -665,6 +672,7 @@ pub async fn action_accept_join_request(
         true,
     )
     .await?;
+    wake_tx.commit().await?;
     if enqueued.should_signal {
         let _ = state.citizen_signal_tx().send(requester_id.to_string());
     }
