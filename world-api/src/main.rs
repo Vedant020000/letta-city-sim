@@ -32,7 +32,7 @@ use routes::agents::{
 use routes::board::{
     clear_board, create_board_post, delete_board_post, get_board_posts, get_public_board,
 };
-use routes::citizens::{citizen_action, create_test_citizen_wake, ws_citizen};
+use routes::citizens::{citizen_action, close_citizen_wake, create_test_citizen_wake, ws_citizen};
 use routes::economy::update_economy;
 use routes::events::{create_event, list_events};
 use routes::intentions::{
@@ -122,6 +122,10 @@ async fn main() -> AppResult<()> {
         .route(
             "/admin/agents/:id/citizen-wakes/test",
             post(create_test_citizen_wake),
+        )
+        .route(
+            "/admin/agents/:id/citizen-wakes/:event_id/close",
+            post(close_citizen_wake),
         )
         .route("/admin/agent-tokens/:id", delete(revoke_agent_token))
         .route("/jobs", get(list_jobs))

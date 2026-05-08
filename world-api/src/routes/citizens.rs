@@ -106,9 +106,21 @@ struct AgentWakeSnapshotRow {
 pub async fn ws_citizen(
     State(state): State<AppState>,
     auth: AuthContext,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> AppResult<impl IntoResponse> {
-    let agent_id = auth.agent_id().ok_or(AppError::Forbidden)?.to_string();
+    let agent_id = auth.agent_id()
+        .map(|s| s.to_string())
+        .or_else(|| {
+            if auth.is_admin() {
+                headers.get(HEADER_AGENT_ID)
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .ok_or(AppError::Forbidden)?;
 
     Ok(ws.on_upgrade(move |socket| handle_citizen_socket(state, agent_id, socket)))
 }
@@ -487,6 +499,43 @@ pub async fn create_test_citizen_wake(
     }
 
     Ok(Json(ApiResponse::from(response)))
+}
+
+#[derive(Debug, Serialize)]
+pub struct CloseCitizenWakeResponse {
+    pub closed: bool,
+    pub event_id: String,
+    pub previous_status: String,
+}
+
+pub async fn close_citizen_wake(
+    State(state): State<AppState>,
+    _sim_key: SimKey,
+    Path((agent_id, event_id)): Path<(String, String)>,
+) -> AppResult<Json<ApiResponse<CloseCitizenWakeResponse>>> {
+    let row = sqlx::query_as::<_, (String, String)>(
+        r#"
+        UPDATE citizen_wakes
+        SET status = 'done', closed_at = NOW()
+        WHERE agent_id = $1 AND event_id = $2
+        RETURNING event_id, status AS previous_status
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(&event_id)
+    .fetch_optional(state.pool())
+    .await?;
+
+    let (returned_event_id, previous_status) = match row {
+        Some((eid, prev)) => (eid, prev),
+        None => return Err(AppError::NotFound),
+    };
+
+    Ok(Json(ApiResponse::from(CloseCitizenWakeResponse {
+        closed: true,
+        event_id: returned_event_id,
+        previous_status,
+    })))
 }
 
 async fn handle_citizen_socket(state: AppState, agent_id: String, mut socket: WebSocket) {

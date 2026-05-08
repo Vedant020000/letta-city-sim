@@ -60,6 +60,10 @@ impl AuthContext {
         self.agent_id.as_deref()
     }
 
+    pub fn is_admin(&self) -> bool {
+        self.is_admin
+    }
+
     pub fn ensure_agent(&self, expected_agent_id: &str) -> AppResult<()> {
         if self.is_admin {
             return Ok(());
