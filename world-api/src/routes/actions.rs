@@ -117,31 +117,37 @@ pub async fn action_move_to(
     AgentId(agent_id): AgentId,
     Json(payload): Json<UpdateAgentLocationRequest>,
 ) -> AppResult<Json<ApiResponse<Agent>>> {
-    // Apply vitals decay and check stamina before moving
+    // Apply vitals decay, check stamina, and deduct — all in one transaction
     let mut tx = state.pool().begin().await?;
     let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
-    tx.commit().await?;
 
     if agent.stamina_level < crate::routes::vitals::MOVE_STAMINA_COST {
+        // Roll back the decay transaction (decay is harmless to lose — it'll be reapplied next time)
         return Err(AppError::BadRequest(
             format!("not enough stamina to move (have {}, need {})", agent.stamina_level, crate::routes::vitals::MOVE_STAMINA_COST),
         ));
     }
 
-    // Deduct stamina cost
-    let mut tx = state.pool().begin().await?;
-    sqlx::query(
+    // Deduct stamina with a WHERE guard to prevent going below 0
+    let rows = sqlx::query(
         r#"
         UPDATE agents
         SET stamina_level = stamina_level - $1,
             updated_at = NOW()
-        WHERE id = $2
+        WHERE id = $2 AND stamina_level >= $1
         "#,
     )
     .bind(crate::routes::vitals::MOVE_STAMINA_COST)
     .bind(&agent_id)
     .execute(&mut *tx)
     .await?;
+
+    if rows.rows_affected() == 0 {
+        return Err(AppError::BadRequest(
+            "not enough stamina to move".to_string(),
+        ));
+    }
+
     tx.commit().await?;
 
     let response = perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
