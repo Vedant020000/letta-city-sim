@@ -194,7 +194,8 @@ pub async fn action_speak_to(
             a2.state
         FROM agents a1
         JOIN agents a2 ON a2.id = $2 OR a2.letta_agent_id = $2
-        WHERE a1.id = $1 OR a1.letta_agent_id = $1
+        WHERE (a1.id = $1 OR a1.letta_agent_id = $1)
+          AND a1.current_location_id = a2.current_location_id
         LIMIT 1
         "#,
     )
@@ -202,7 +203,9 @@ pub async fn action_speak_to(
     .bind(&target_id)
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or(AppError::NotFound)?;
+    .ok_or_else(|| AppError::BadRequest(
+        format!("cannot speak to {} — you must be in the same location", target_id)
+    ))?;
 
     if location_check.2 == "sleeping" {
         return Err(AppError::BadRequest(
@@ -439,7 +442,8 @@ pub async fn action_leave_conversation(
     sqlx::query(
         r#"
         UPDATE conversation_participants
-        SET left_at = NOW()
+        SET left_at = NOW(),
+            status = 'left'
         WHERE conversation_id = $1 AND agent_id = $2
         "#,
     )

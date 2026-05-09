@@ -27,7 +27,7 @@ use routes::actions::{
     action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
     action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
     action_send_message, action_set_activity, action_set_intention, action_sleep,
-    action_speak_to, action_transfer_item, action_use_item, get_tool_manifest,
+    action_speak_to, action_transfer_item, action_use_item, action_wake_up, get_tool_manifest,
 };
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
@@ -99,6 +99,7 @@ async fn main() -> AppResult<()> {
         .route("/actions/move_to", post(action_move_to))
         .route("/actions/board_post", post(action_board_post))
         .route("/actions/sleep", post(action_sleep))
+        .route("/actions/wake_up", post(action_wake_up))
         .route("/actions/cook_food", post(action_cook_food))
         .route("/actions/look_around", post(action_look_around))
         .route("/actions/speak_to", post(action_speak_to))

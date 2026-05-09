@@ -515,10 +515,16 @@ pub async fn close_citizen_wake(
 ) -> AppResult<Json<ApiResponse<CloseCitizenWakeResponse>>> {
     let row = sqlx::query_as::<_, (String, String)>(
         r#"
-        UPDATE citizen_wakes
+        WITH old AS (
+            SELECT event_id, status AS old_status
+            FROM citizen_wakes
+            WHERE agent_id = $1 AND event_id = $2
+        )
+        UPDATE citizen_wakes cw
         SET status = 'done', closed_at = NOW()
-        WHERE agent_id = $1 AND event_id = $2
-        RETURNING event_id, status AS previous_status
+        FROM old
+        WHERE cw.agent_id = $1 AND cw.event_id = $2
+        RETURNING cw.event_id, old.old_status AS previous_status
         "#,
     )
     .bind(&agent_id)
@@ -938,6 +944,7 @@ async fn load_agent_wake_snapshot_tx(
         "agent_id": snapshot.id,
         "citizen_id": snapshot.id,
         "display_name": snapshot.name,
+        "state": agent.state,
         "location": {
             "id": snapshot.current_location_id,
             "type": Value::Null,

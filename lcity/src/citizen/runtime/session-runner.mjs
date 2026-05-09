@@ -9,6 +9,7 @@ function buildWakeInput(wake, manifest) {
   const availableTools = (manifest.tools || []).map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
 
   const agent = wake.agent || {};
+  const agentState = agent.state || "idle";
   const balanceCents = agent.balance_cents ?? null;
   const vitals = agent.vitals ?? null;
   const inventory = agent.inventory ?? [];
@@ -21,6 +22,7 @@ function buildWakeInput(wake, manifest) {
     `- wake_type: ${wake.type}`,
     `- world_time: ${wake.world_time}`,
     `- location: ${locationName}`,
+    `- state: ${agentState}`,
     `- trigger: ${triggerKind}:${triggerRef}`,
   ];
 

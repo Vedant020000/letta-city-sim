@@ -359,14 +359,8 @@ pub async fn use_item(
     }
 
     // Apply vital adjustments if this is a consumable
-    let mut agent = sqlx::query_as::<_, Agent>(
-        r#"
-        SELECT * FROM agents WHERE id = $1
-        "#,
-    )
-    .bind(&agent_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    // Apply vitals decay first so boost is applied to current values
+    let mut agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
 
     if let Some(ref consumable_type) = item.consumable_type {
         let vital_boost = item.vital_value.unwrap_or(10) as i16;

@@ -174,6 +174,13 @@ pub async fn action_sleep(
     start_sleep(state, AgentId(agent_id)).await
 }
 
+pub async fn action_wake_up(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<Agent>>> {
+    crate::routes::sleep::wake_up(State(state), AgentId(agent_id)).await
+}
+
 pub async fn action_cook_food(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
@@ -599,9 +606,9 @@ pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> AppResult<Json<ApiResponse<ToolManifestResponse>>> {
-    let agent_row = sqlx::query_as::<_, (String, String, String)>(
+    let agent_row = sqlx::query_as::<_, (String, String, String, String)>(
         r#"
-        SELECT a.id, a.current_location_id, l.name
+        SELECT a.id, a.current_location_id, l.name, a.state
         FROM agents a
         JOIN locations l ON l.id = a.current_location_id
         WHERE a.id = $1 OR a.letta_agent_id = $1
@@ -735,6 +742,9 @@ pub async fn get_tool_manifest(
     if has_sleep {
         tools.push(tool_sleep());
     }
+    if agent_row.3 == "sleeping" {
+        tools.push(tool_wake_up());
+    }
     if has_board {
         tools.push(tool_board_post());
     }
@@ -826,6 +836,20 @@ fn tool_sleep() -> WorldToolDefinition {
         name: "sleep".to_string(),
         description: "Go to sleep if the current location has a valid bed.".to_string(),
         endpoint: "/actions/sleep".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
+fn tool_wake_up() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "wake_up".to_string(),
+        description: "Wake up from sleep. Your sleep_level will have recovered while you were sleeping.".to_string(),
+        endpoint: "/actions/wake_up".to_string(),
         method: "POST".to_string(),
         parameters: json!({
             "type": "object",
