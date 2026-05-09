@@ -490,20 +490,7 @@ pub async fn respond_money_request(
         .await?;
 
         if balance < amount_cents {
-            // Mark as cancelled due to insufficient funds
-            sqlx::query(
-                r#"
-                UPDATE economy_transactions
-                SET status = 'cancelled', resolved_at = NOW()
-                WHERE id = $1
-                "#,
-            )
-            .bind(payload.transaction_id)
-            .execute(&mut *tx)
-            .await?;
-
-            tx.commit().await?;
-
+            // Leave request as pending — payer can retry after earning more
             return Err(AppError::BadRequest(
                 format!("insufficient balance (have {}, need {})", balance, amount_cents),
             ));

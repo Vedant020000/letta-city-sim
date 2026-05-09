@@ -144,7 +144,7 @@ pub async fn action_move_to(
 
     if rows.rows_affected() == 0 {
         return Err(AppError::BadRequest(
-            "not enough stamina to move".to_string(),
+            format!("not enough stamina to move (have {}, need {})", agent.stamina_level, crate::routes::vitals::MOVE_STAMINA_COST),
         ));
     }
 
