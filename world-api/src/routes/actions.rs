@@ -64,6 +64,7 @@ pub struct LookAroundResponse {
     pub nearby: Vec<AdjacentLocation>,
     pub objects: Vec<WorldObject>,
     pub agents_present: Vec<LookAroundAgent>,
+    pub items_on_ground: Vec<InventoryItem>,
 }
 
 #[derive(Debug, Serialize)]
@@ -268,11 +269,24 @@ pub async fn action_look_around(
     .fetch_all(state.pool())
     .await?;
 
+    let items_on_ground = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value
+        FROM inventory_items
+        WHERE location_id = $1
+        ORDER BY name
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_all(state.pool())
+    .await?;
+
     Ok(Json(ApiResponse::from(LookAroundResponse {
         location,
         nearby,
         objects,
         agents_present,
+        items_on_ground,
     })))
 }
 
