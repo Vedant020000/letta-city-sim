@@ -10,6 +10,7 @@ use crate::auth::AgentId;
 use crate::error::{AppError, AppResult};
 use crate::models::agent::Agent;
 use crate::models::common::ApiResponse;
+use crate::models::inventory::InventoryItem;
 use crate::models::location::{Location, AdjacentLocation};
 use crate::models::object::WorldObject;
 use crate::routes::agents::{
@@ -20,6 +21,11 @@ use crate::routes::board::{CreateBoardPostRequest, create_board_post};
 use crate::routes::conversations::{
     AcceptInviteRequest, AcceptRequestRequest, JoinConversationRequest, SendMessageRequest,
     SpeakToRequest,
+};
+use crate::routes::inventory::{
+    add_item_to_agent_inventory, get_agent_inventory, remove_item_from_agent_inventory,
+    transfer_item_between_agents, use_item, AddInventoryItemRequest, RemoveInventoryItemRequest,
+    TransferItemRequest, UseItemRequest,
 };
 use crate::routes::sleep::start_sleep;
 use crate::state::AppState;
@@ -318,6 +324,92 @@ pub async fn action_accept_invitation(
     crate::routes::conversations::action_accept_invitation(State(state), AgentId(agent_id), Json(payload)).await
 }
 
+// ---------------------------------------------------------------------------
+// Inventory + economy action handlers
+// ---------------------------------------------------------------------------
+
+pub async fn action_get_inventory(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<Vec<InventoryItem>>> {
+    get_agent_inventory(State(state), Path(agent_id)).await
+}
+
+pub async fn action_pick_up_item(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<AddInventoryItemRequest>,
+) -> AppResult<Json<InventoryItem>> {
+    let auth = crate::auth::AuthContext::agent(agent_id.clone());
+    add_item_to_agent_inventory(State(state), auth, Path(agent_id), Json(payload)).await
+}
+
+pub async fn action_drop_item(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<RemoveInventoryItemRequest>,
+) -> AppResult<Json<InventoryItem>> {
+    let auth = crate::auth::AuthContext::agent(agent_id.clone());
+    remove_item_from_agent_inventory(State(state), auth, Path(agent_id), Json(payload)).await
+}
+
+pub async fn action_use_item(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<UseItemRequest>,
+) -> AppResult<Json<ApiResponse<Agent>>> {
+    use_item(State(state), AgentId(agent_id), Json(payload)).await
+}
+
+pub async fn action_transfer_item(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<TransferItemRequest>,
+) -> AppResult<Json<serde_json::Value>> {
+    let auth = crate::auth::AuthContext::agent(agent_id.clone());
+    transfer_item_between_agents(State(state), auth, Path(agent_id), Json(payload)).await
+}
+
+#[derive(Debug, Serialize)]
+pub struct EconomySnapshot {
+    pub balance_cents: i64,
+    pub last_income_cents: Option<i64>,
+    pub last_income_reason: Option<String>,
+    pub last_income_at: Option<String>,
+    pub last_expense_cents: Option<i64>,
+    pub last_expense_reason: Option<String>,
+    pub last_expense_at: Option<String>,
+}
+
+pub async fn action_check_balance(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<EconomySnapshot>>> {
+    let row = sqlx::query_as::<_, (i64, Option<i64>, Option<String>, Option<chrono::DateTime<chrono::Utc>>, Option<i64>, Option<String>, Option<chrono::DateTime<chrono::Utc>>)>(
+        r#"
+        SELECT balance_cents,
+               last_income_cents, last_income_reason, last_income_at,
+               last_expense_cents, last_expense_reason, last_expense_at
+        FROM agents
+        WHERE id = $1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    Ok(Json(ApiResponse::from(EconomySnapshot {
+        balance_cents: row.0,
+        last_income_cents: row.1,
+        last_income_reason: row.2,
+        last_income_at: row.3.map(|dt| dt.to_rfc3339()),
+        last_expense_cents: row.4,
+        last_expense_reason: row.5,
+        last_expense_at: row.6.map(|dt| dt.to_rfc3339()),
+    })))
+}
+
 pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
@@ -424,7 +516,18 @@ pub async fn get_tool_manifest(
     .await?;
     let has_pending_invites = pending_invites.is_some();
 
-    let mut tools = vec![tool_set_activity(), tool_move_to(), tool_look_around(), tool_speak_to()];
+    let mut tools = vec![
+        tool_set_activity(),
+        tool_move_to(),
+        tool_look_around(),
+        tool_speak_to(),
+        tool_get_inventory(),
+        tool_pick_up_item(),
+        tool_drop_item(),
+        tool_use_item(),
+        tool_transfer_item(),
+        tool_check_balance(),
+    ];
     if has_sleep {
         tools.push(tool_sleep());
     }
@@ -686,6 +789,119 @@ fn tool_accept_invitation() -> WorldToolDefinition {
                 }
             },
             "required": ["conversation_id"]
+        }),
+    }
+}
+
+fn tool_get_inventory() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "get_inventory".to_string(),
+        description: "List all items currently in the agent's inventory.".to_string(),
+        endpoint: "/actions/get_inventory".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
+fn tool_pick_up_item() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "pick_up_item".to_string(),
+        description: "Pick up an item from the current location and add it to the agent's inventory. The item must be present at the agent's current location.".to_string(),
+        endpoint: "/actions/pick_up_item".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "The ID of the item to pick up."
+                }
+            },
+            "required": ["item_id"]
+        }),
+    }
+}
+
+fn tool_drop_item() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "drop_item".to_string(),
+        description: "Drop an item from the agent's inventory, leaving it at the current location.".to_string(),
+        endpoint: "/actions/drop_item".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "The ID of the item to drop."
+                }
+            },
+            "required": ["item_id"]
+        }),
+    }
+}
+
+fn tool_use_item() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "use_item".to_string(),
+        description: "Use a consumable item from the agent's inventory. Consumables restore vitals (food restores food_level, water restores water_level, etc.). The item quantity is decremented.".to_string(),
+        endpoint: "/actions/use_item".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "The ID of the item to use."
+                },
+                "quantity": {
+                    "type": "integer",
+                    "description": "How many to use.",
+                    "minimum": 1
+                }
+            },
+            "required": ["item_id", "quantity"]
+        }),
+    }
+}
+
+fn tool_transfer_item() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "transfer_item".to_string(),
+        description: "Transfer an item from the agent's inventory to another agent. Both agents must be at directly adjacent locations.".to_string(),
+        endpoint: "/actions/transfer_item".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "to_agent_id": {
+                    "type": "string",
+                    "description": "The agent ID of the recipient."
+                },
+                "item_id": {
+                    "type": "string",
+                    "description": "The ID of the item to transfer."
+                }
+            },
+            "required": ["to_agent_id", "item_id"]
+        }),
+    }
+}
+
+fn tool_check_balance() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_balance".to_string(),
+        description: "Check the agent's current balance and recent income/expense history.".to_string(),
+        endpoint: "/actions/check_balance".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
         }),
     }
 }
