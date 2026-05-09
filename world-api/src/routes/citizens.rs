@@ -906,6 +906,43 @@ async fn load_agent_wake_snapshot_tx(
     .await?
     .ok_or(AppError::NotFound)?;
 
+    // Enrich with vitals + balance
+    let vitals = sqlx::query_as::<_, (i64, i16, i16, i16, i16)>(
+        r#"
+        SELECT balance_cents, food_level, water_level, stamina_level, sleep_level
+        FROM agents
+        WHERE id = $1
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    // Enrich with inventory
+    let inventory: Vec<(String, String, i16, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT id, name, quantity, consumable_type
+        FROM inventory_items
+        WHERE held_by = $1
+        ORDER BY name
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let inventory_json: Vec<Value> = inventory
+        .into_iter()
+        .map(|(id, name, quantity, consumable_type)| {
+            json!({
+                "id": id,
+                "name": name,
+                "quantity": quantity,
+                "consumable_type": consumable_type,
+            })
+        })
+        .collect();
+
     Ok(json!({
         "agent_id": snapshot.id,
         "citizen_id": snapshot.id,
@@ -914,7 +951,15 @@ async fn load_agent_wake_snapshot_tx(
             "id": snapshot.current_location_id,
             "type": Value::Null,
             "name": snapshot.location_name,
-        }
+        },
+        "balance_cents": vitals.0,
+        "vitals": {
+            "food_level": vitals.1,
+            "water_level": vitals.2,
+            "stamina_level": vitals.3,
+            "sleep_level": vitals.4,
+        },
+        "inventory": inventory_json,
     }))
 }
 

@@ -8,7 +8,12 @@ function buildWakeInput(wake, manifest) {
   const triggerRef = wake.trigger?.ref || "unknown";
   const availableTools = (manifest.tools || []).map((tool) => `- ${tool.name}: ${tool.description}`).join("\n");
 
-  return [
+  const agent = wake.agent || {};
+  const balanceCents = agent.balance_cents ?? null;
+  const vitals = agent.vitals ?? null;
+  const inventory = agent.inventory ?? [];
+
+  const lines = [
     wake.prompt?.narrative || "You have received a city wake.",
     "",
     "Wake metadata:",
@@ -17,6 +22,27 @@ function buildWakeInput(wake, manifest) {
     `- world_time: ${wake.world_time}`,
     `- location: ${locationName}`,
     `- trigger: ${triggerKind}:${triggerRef}`,
+  ];
+
+  if (balanceCents !== null) {
+    lines.push("", `Your balance: $${(balanceCents / 100).toFixed(2)}`);
+  }
+
+  if (vitals) {
+    lines.push(`Your vitals: food ${vitals.food_level}/100, water ${vitals.water_level}/100, stamina ${vitals.stamina_level}/100, sleep ${vitals.sleep_level}/100`);
+  }
+
+  if (inventory.length > 0) {
+    lines.push("", "Your inventory:");
+    for (const item of inventory) {
+      const tag = item.consumable_type ? ` (${item.consumable_type})` : "";
+      lines.push(`  - ${item.name} x${item.quantity}${tag}`);
+    }
+  } else if (inventory.length === 0) {
+    lines.push("", "Your inventory: (empty)");
+  }
+
+  lines.push(
     "",
     "Use only the currently available world tools for world-visible actions.",
     "Freeform text alone does not change shared world state.",
@@ -25,7 +51,9 @@ function buildWakeInput(wake, manifest) {
     availableTools || "- (none)",
     "",
     `Structured wake payload: ${JSON.stringify(wake.prompt?.structured ?? {})}`,
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }
 
 function createToolPolicy(toolNames) {
