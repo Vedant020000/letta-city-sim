@@ -555,7 +555,14 @@ pub async fn action_complete_intention(
     AgentId(agent_id): AgentId,
     Json(payload): Json<CompleteIntentionRequest>,
 ) -> AppResult<Json<ApiResponse<AgentIntention>>> {
-    // Get the current active intention
+    let status = match payload.status.trim().to_lowercase().as_str() {
+        "completed" | "failed" | "abandoned" => payload.status.trim().to_lowercase(),
+        _ => return Err(AppError::BadRequest("status must be completed, failed, or abandoned".to_string())),
+    };
+
+    // Read active intention inside a transaction with FOR UPDATE (via update_agent_intention)
+    // First, find the intention ID
+    let mut tx = state.pool().begin().await?;
     let intention = sqlx::query_as::<_, AgentIntention>(
         r#"
         SELECT id, agent_id, summary, reason, status, expected_location_id, expected_action,
@@ -563,24 +570,24 @@ pub async fn action_complete_intention(
         FROM agent_intentions
         WHERE agent_id = $1 AND status = 'active'
         LIMIT 1
+        FOR UPDATE
         "#,
     )
     .bind(&agent_id)
-    .fetch_optional(state.pool())
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or(AppError::BadRequest("no active intention to complete".to_string()))?;
 
-    let status = match payload.status.trim().to_lowercase().as_str() {
-        "completed" | "failed" | "abandoned" => payload.status.trim().to_lowercase(),
-        _ => return Err(AppError::BadRequest("status must be completed, failed, or abandoned".to_string())),
-    };
+    let intention_id = intention.id.clone();
+    // Drop the read transaction — update_agent_intention will start its own
+    drop(tx);
 
     crate::routes::intentions::update_agent_intention(
         State(state),
         crate::auth::AuthContext::agent(agent_id.clone()),
         Path(crate::routes::intentions::AgentIntentionPath {
             id: agent_id,
-            intention_id: intention.id,
+            intention_id,
         }),
         Json(UpdateAgentIntentionRequest {
             status: Some(status),

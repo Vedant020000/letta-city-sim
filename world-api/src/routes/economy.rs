@@ -195,7 +195,7 @@ pub async fn pay_agent(
         }
     }
 
-    // Debit sender
+    // Debit sender (with balance guard to prevent overdraft)
     let from_new = sqlx::query_scalar::<_, i64>(
         r#"
         UPDATE agents
@@ -204,15 +204,18 @@ pub async fn pay_agent(
             last_expense_reason = $2,
             last_expense_at = NOW(),
             updated_at = NOW()
-        WHERE id = $3
+        WHERE id = $3 AND balance_cents >= $1
         RETURNING balance_cents
         "#,
     )
     .bind(payload.amount_cents)
     .bind(payload.reason.clone().unwrap_or_else(|| "Payment".to_string()))
     .bind(&from_agent_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::BadRequest(
+        format!("insufficient balance (need {} cents)", payload.amount_cents)
+    ))?;
 
     // Credit receiver
     let to_new = sqlx::query_scalar::<_, i64>(
@@ -496,8 +499,8 @@ pub async fn respond_money_request(
             ));
         }
 
-        // Debit payer
-        sqlx::query(
+        // Debit payer (with balance guard)
+        let debit_rows = sqlx::query(
             r#"
             UPDATE agents
             SET balance_cents = balance_cents - $1,
@@ -505,13 +508,19 @@ pub async fn respond_money_request(
                 last_expense_reason = 'Money request fulfilled',
                 last_expense_at = NOW(),
                 updated_at = NOW()
-            WHERE id = $2
+            WHERE id = $2 AND balance_cents >= $1
             "#,
         )
         .bind(amount_cents)
         .bind(&agent_id)
         .execute(&mut *tx)
         .await?;
+
+        if debit_rows.rows_affected() == 0 {
+            return Err(AppError::BadRequest(
+                format!("insufficient balance (need {} cents)", amount_cents)
+            ));
+        }
 
         // Credit requester
         sqlx::query(

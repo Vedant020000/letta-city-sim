@@ -242,7 +242,7 @@ pub async fn transfer_item_between_agents(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let is_adjacent = sqlx::query_scalar::<_, bool>(
+    let is_adjacent = from_location == to_location || sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS (
             SELECT 1
@@ -259,7 +259,7 @@ pub async fn transfer_item_between_agents(
 
     if !is_adjacent {
         return Err(AppError::BadRequest(
-            "agents must be directly adjacent to transfer items".to_string(),
+            "agents must be in the same or adjacent locations to transfer items".to_string(),
         ));
     }
 

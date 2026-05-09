@@ -476,6 +476,56 @@ pub async fn action_leave_conversation(
 
     tx.commit().await?;
 
+    // Wake remaining participants about the departure
+    let remaining_participants: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT agent_id FROM conversation_participants
+        WHERE conversation_id = $1 AND status = 'active' AND left_at IS NULL
+        "#,
+    )
+    .bind(&conversation_id)
+    .fetch_all(state.pool())
+    .await?;
+
+    let leaver_name = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT name FROM agents WHERE id = $1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_one(state.pool())
+    .await
+    .unwrap_or_else(|_| agent_id.clone());
+
+    for participant_id in remaining_participants {
+        let mut wake_tx = state.pool().begin().await?;
+        let _ = enqueue_citizen_wake_tx(
+            &mut wake_tx,
+            &participant_id,
+            "conversation",
+            serde_json::json!({
+                "kind": "conversation",
+                "ref": "conversation.participant_left",
+                "details": {
+                    "conversation_id": &conversation_id,
+                    "leaver_id": &agent_id,
+                    "leaver_name": &leaver_name,
+                }
+            }),
+            format!("{} left the conversation.", &leaver_name),
+            serde_json::json!({
+                "event_type": "conversation.participant_left",
+                "conversation_id": &conversation_id,
+                "leaver_id": &agent_id,
+                "leaver_name": &leaver_name,
+            }),
+            serde_json::json!([]),
+            true,
+        )
+        .await;
+        let _ = wake_tx.commit().await;
+    }
+
     Ok(Json(ApiResponse::from(serde_json::json!({
         "status": "left",
         "message": "You have left the conversation.",
@@ -729,6 +779,57 @@ pub async fn action_accept_invitation(
     .await?;
 
     tx.commit().await?;
+
+    // Wake existing participants about the new joiner
+    let existing_participants: Vec<String> = sqlx::query_scalar(
+        r#"
+        SELECT agent_id FROM conversation_participants
+        WHERE conversation_id = $1 AND status = 'active' AND agent_id != $2
+        "#,
+    )
+    .bind(&conversation_id)
+    .bind(&agent_id)
+    .fetch_all(state.pool())
+    .await?;
+
+    let joiner_name = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT name FROM agents WHERE id = $1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_one(state.pool())
+    .await
+    .unwrap_or_else(|_| agent_id.clone());
+
+    for participant_id in existing_participants {
+        let mut wake_tx = state.pool().begin().await?;
+        let _ = enqueue_citizen_wake_tx(
+            &mut wake_tx,
+            &participant_id,
+            "conversation",
+            serde_json::json!({
+                "kind": "conversation",
+                "ref": "conversation.participant_joined",
+                "details": {
+                    "conversation_id": &conversation_id,
+                    "joiner_id": &agent_id,
+                    "joiner_name": &joiner_name,
+                }
+            }),
+            format!("{} joined the conversation.", &joiner_name),
+            serde_json::json!({
+                "event_type": "conversation.participant_joined",
+                "conversation_id": &conversation_id,
+                "joiner_id": &agent_id,
+                "joiner_name": &joiner_name,
+            }),
+            serde_json::json!([]),
+            true,
+        )
+        .await;
+        let _ = wake_tx.commit().await;
+    }
 
     Ok(Json(ApiResponse::from(serde_json::json!({
         "status": "joined",
