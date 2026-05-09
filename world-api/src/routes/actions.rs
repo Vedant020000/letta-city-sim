@@ -32,6 +32,7 @@ use crate::routes::economy::{
     PayAgentRequest, RequestMoneyRequest, RespondMoneyRequestRequest, GetTransactionLogRequest,
 };
 use crate::routes::sleep::start_sleep;
+use crate::models::intention::{CreateAgentIntentionRequest, UpdateAgentIntentionRequest, AgentIntention};
 use crate::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -522,6 +523,78 @@ pub async fn action_check_vitals(
     })))
 }
 
+pub async fn action_set_intention(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<CreateAgentIntentionRequest>,
+) -> AppResult<Json<ApiResponse<AgentIntention>>> {
+    crate::routes::intentions::create_agent_intention(
+        State(state),
+        crate::auth::AuthContext::agent(agent_id.clone()),
+        Path(agent_id),
+        Json(payload),
+    )
+    .await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CompleteIntentionRequest {
+    pub status: String,
+    pub outcome: Option<String>,
+}
+
+pub async fn action_complete_intention(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<CompleteIntentionRequest>,
+) -> AppResult<Json<ApiResponse<AgentIntention>>> {
+    // Get the current active intention
+    let intention = sqlx::query_as::<_, AgentIntention>(
+        r#"
+        SELECT id, agent_id, summary, reason, status, expected_location_id, expected_action,
+               outcome, metadata, created_at, updated_at, completed_at
+        FROM agent_intentions
+        WHERE agent_id = $1 AND status = 'active'
+        LIMIT 1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or(AppError::BadRequest("no active intention to complete".to_string()))?;
+
+    let status = match payload.status.trim().to_lowercase().as_str() {
+        "completed" | "failed" | "abandoned" => payload.status.trim().to_lowercase(),
+        _ => return Err(AppError::BadRequest("status must be completed, failed, or abandoned".to_string())),
+    };
+
+    crate::routes::intentions::update_agent_intention(
+        State(state),
+        crate::auth::AuthContext::agent(agent_id.clone()),
+        Path(crate::routes::intentions::AgentIntentionPath {
+            id: agent_id,
+            intention_id: intention.id,
+        }),
+        Json(UpdateAgentIntentionRequest {
+            status: Some(status),
+            outcome: payload.outcome,
+            ..Default::default()
+        }),
+    )
+    .await
+}
+
+pub async fn action_get_intention(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<Option<AgentIntention>>>> {
+    crate::routes::intentions::get_current_agent_intention(
+        State(state),
+        Path(agent_id),
+    )
+    .await
+}
+
 pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
@@ -655,6 +728,9 @@ pub async fn get_tool_manifest(
         tool_request_money(),
         tool_get_transaction_log(),
         tool_check_vitals(),
+        tool_set_intention(),
+        tool_complete_intention(),
+        tool_get_intention(),
     ];
     if has_sleep {
         tools.push(tool_sleep());
@@ -1142,6 +1218,75 @@ fn tool_check_vitals() -> WorldToolDefinition {
         name: "check_vitals".to_string(),
         description: "Check your current vitals (food, water, stamina, sleep levels) and balance. Vitals decay over time, so this always returns up-to-date values.".to_string(),
         endpoint: "/actions/check_vitals".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
+fn tool_set_intention() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "set_intention".to_string(),
+        description: "Set your current intention — what you plan to do next. You can only have one active intention at a time. Use this to plan your next action (e.g., 'go to the cafe to eat', 'walk to the park').".to_string(),
+        endpoint: "/actions/set_intention".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "Short description of what you intend to do."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Why you want to do this."
+                },
+                "expected_location_id": {
+                    "type": "string",
+                    "description": "The location you expect to go to (optional)."
+                },
+                "expected_action": {
+                    "type": "string",
+                    "description": "The action you expect to take (optional, e.g., 'eat', 'sleep')."
+                }
+            },
+            "required": ["summary", "reason"]
+        }),
+    }
+}
+
+fn tool_complete_intention() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "complete_intention".to_string(),
+        description: "Mark your current active intention as completed, failed, or abandoned. You must provide a status and optionally an outcome describing what happened.".to_string(),
+        endpoint: "/actions/complete_intention".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["completed", "failed", "abandoned"],
+                    "description": "The final status: 'completed' if you succeeded, 'failed' if you couldn't do it, 'abandoned' if you changed your mind."
+                },
+                "outcome": {
+                    "type": "string",
+                    "description": "What happened — a brief description of the result (optional)."
+                }
+            },
+            "required": ["status"]
+        }),
+    }
+}
+
+fn tool_get_intention() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "get_intention".to_string(),
+        description: "Get your current active intention, if any. Returns null if you have no active intention.".to_string(),
+        endpoint: "/actions/get_intention".to_string(),
         method: "POST".to_string(),
         parameters: json!({
             "type": "object",

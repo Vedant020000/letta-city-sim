@@ -22,11 +22,12 @@ use auth::require_sim_key;
 use error::AppResult;
 use routes::actions::{
     action_accept_invitation, action_accept_join_request, action_board_post, action_check_balance,
-    action_cook_food, action_check_vitals, action_drop_item, action_get_inventory,
-    action_get_transaction_log, action_join_conversation, action_leave_conversation,
-    action_look_around, action_move_to, action_pay_agent, action_pick_up_item,
-    action_request_money, action_respond_money_request, action_send_message, action_set_activity,
-    action_sleep, action_speak_to, action_transfer_item, action_use_item, get_tool_manifest,
+    action_cook_food, action_check_vitals, action_complete_intention, action_drop_item,
+    action_get_intention, action_get_inventory, action_get_transaction_log,
+    action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
+    action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
+    action_send_message, action_set_activity, action_set_intention, action_sleep,
+    action_speak_to, action_transfer_item, action_use_item, get_tool_manifest,
 };
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
@@ -117,6 +118,9 @@ async fn main() -> AppResult<()> {
         .route("/actions/respond_money_request", post(action_respond_money_request))
         .route("/actions/get_transaction_log", post(action_get_transaction_log))
         .route("/actions/check_vitals", post(action_check_vitals))
+        .route("/actions/set_intention", post(action_set_intention))
+        .route("/actions/complete_intention", post(action_complete_intention))
+        .route("/actions/get_intention", post(action_get_intention))
         .route("/conversations", get(list_active_conversations))
         .route("/conversations/:id", get(get_conversation_detail))
         .route("/locations/:id", get(get_location_by_id))

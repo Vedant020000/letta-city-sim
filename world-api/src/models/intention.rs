@@ -27,7 +27,7 @@ pub struct CreateAgentIntentionRequest {
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct UpdateAgentIntentionRequest {
     pub summary: Option<String>,
     pub reason: Option<String>,
