@@ -22,8 +22,9 @@ use auth::require_sim_key;
 use error::AppResult;
 use routes::actions::{
     action_accept_invitation, action_accept_join_request, action_board_post, action_check_balance,
-    action_cook_food, action_drop_item, action_get_inventory, action_join_conversation,
-    action_leave_conversation, action_look_around, action_move_to, action_pick_up_item,
+    action_cook_food, action_drop_item, action_get_inventory, action_get_transaction_log,
+    action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
+    action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
     action_send_message, action_set_activity, action_sleep, action_speak_to, action_transfer_item,
     action_use_item, get_tool_manifest,
 };
@@ -111,6 +112,10 @@ async fn main() -> AppResult<()> {
         .route("/actions/use_item", post(action_use_item))
         .route("/actions/transfer_item", post(action_transfer_item))
         .route("/actions/check_balance", post(action_check_balance))
+        .route("/actions/pay_agent", post(action_pay_agent))
+        .route("/actions/request_money", post(action_request_money))
+        .route("/actions/respond_money_request", post(action_respond_money_request))
+        .route("/actions/get_transaction_log", post(action_get_transaction_log))
         .route("/conversations", get(list_active_conversations))
         .route("/conversations/:id", get(get_conversation_detail))
         .route("/locations/:id", get(get_location_by_id))

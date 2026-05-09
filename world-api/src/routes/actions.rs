@@ -27,6 +27,10 @@ use crate::routes::inventory::{
     transfer_item_between_agents, use_item, AddInventoryItemRequest, RemoveInventoryItemRequest,
     TransferItemRequest, UseItemRequest,
 };
+use crate::routes::economy::{
+    pay_agent, request_money, respond_money_request, get_transaction_log,
+    PayAgentRequest, RequestMoneyRequest, RespondMoneyRequestRequest, GetTransactionLogRequest,
+};
 use crate::routes::sleep::start_sleep;
 use crate::state::AppState;
 
@@ -424,6 +428,41 @@ pub async fn action_check_balance(
     })))
 }
 
+pub async fn action_pay_agent(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<PayAgentRequest>,
+) -> AppResult<Json<ApiResponse<crate::routes::economy::PayAgentResponse>>> {
+    let auth = crate::auth::AuthContext::agent(agent_id.clone());
+    pay_agent(State(state), auth, Path(agent_id), Json(payload)).await
+}
+
+pub async fn action_request_money(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<RequestMoneyRequest>,
+) -> AppResult<Json<ApiResponse<crate::routes::economy::RequestMoneyResponse>>> {
+    let auth = crate::auth::AuthContext::agent(agent_id.clone());
+    request_money(State(state), auth, Path(agent_id), Json(payload)).await
+}
+
+pub async fn action_respond_money_request(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<RespondMoneyRequestRequest>,
+) -> AppResult<Json<ApiResponse<crate::routes::economy::RespondMoneyRequestResponse>>> {
+    let auth = crate::auth::AuthContext::agent(agent_id.clone());
+    respond_money_request(State(state), auth, Path(agent_id), Json(payload)).await
+}
+
+pub async fn action_get_transaction_log(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<GetTransactionLogRequest>,
+) -> AppResult<Json<Vec<crate::routes::economy::EconomyTransaction>>> {
+    get_transaction_log(State(state), Path(agent_id), Json(payload)).await
+}
+
 pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
@@ -530,6 +569,18 @@ pub async fn get_tool_manifest(
     .await?;
     let has_pending_invites = pending_invites.is_some();
 
+    let pending_money_requests = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT id FROM economy_transactions
+        WHERE from_agent_id = $1 AND transaction_type = 'money_request' AND status = 'pending'
+        LIMIT 1
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_optional(state.pool())
+    .await?;
+    let has_pending_money_requests = pending_money_requests.is_some();
+
     let mut tools = vec![
         tool_set_activity(),
         tool_move_to(),
@@ -541,6 +592,9 @@ pub async fn get_tool_manifest(
         tool_use_item(),
         tool_transfer_item(),
         tool_check_balance(),
+        tool_pay_agent(),
+        tool_request_money(),
+        tool_get_transaction_log(),
     ];
     if has_sleep {
         tools.push(tool_sleep());
@@ -561,6 +615,9 @@ pub async fn get_tool_manifest(
     }
     if has_pending_invites {
         tools.push(tool_accept_invitation());
+    }
+    if has_pending_money_requests {
+        tools.push(tool_respond_money_request());
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -915,6 +972,106 @@ fn tool_check_balance() -> WorldToolDefinition {
         parameters: json!({
             "type": "object",
             "properties": {},
+            "required": []
+        }),
+    }
+}
+
+fn tool_pay_agent() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "pay_agent".to_string(),
+        description: "Transfer money to another agent. Both agents must be at the same or adjacent locations. The amount is deducted from your balance immediately.".to_string(),
+        endpoint: "/actions/pay_agent".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "to_agent_id": {
+                    "type": "string",
+                    "description": "The agent ID to send money to."
+                },
+                "amount_cents": {
+                    "type": "integer",
+                    "description": "Amount in cents to transfer.",
+                    "minimum": 1
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Optional reason for the payment."
+                }
+            },
+            "required": ["to_agent_id", "amount_cents"]
+        }),
+    }
+}
+
+fn tool_request_money() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "request_money".to_string(),
+        description: "Request money from another agent. The request is recorded as pending and the other agent can accept or reject it.".to_string(),
+        endpoint: "/actions/request_money".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "from_agent_id": {
+                    "type": "string",
+                    "description": "The agent ID to request money from."
+                },
+                "amount_cents": {
+                    "type": "integer",
+                    "description": "Amount in cents to request.",
+                    "minimum": 1
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Optional reason for the request."
+                }
+            },
+            "required": ["from_agent_id", "amount_cents"]
+        }),
+    }
+}
+
+fn tool_respond_money_request() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "respond_money_request".to_string(),
+        description: "Accept or reject a pending money request from another agent. Use the transaction_id from the request.".to_string(),
+        endpoint: "/actions/respond_money_request".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "transaction_id": {
+                    "type": "integer",
+                    "description": "The transaction ID of the money request."
+                },
+                "accept": {
+                    "type": "boolean",
+                    "description": "True to accept and pay, false to reject."
+                }
+            },
+            "required": ["transaction_id", "accept"]
+        }),
+    }
+}
+
+fn tool_get_transaction_log() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "get_transaction_log".to_string(),
+        description: "View recent transactions where you were the sender or receiver. Shows payments, money requests, and their status.".to_string(),
+        endpoint: "/actions/get_transaction_log".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max number of transactions to return (1-100, default 20).",
+                    "minimum": 1,
+                    "maximum": 100
+                }
+            },
             "required": []
         }),
     }
