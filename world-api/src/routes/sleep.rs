@@ -74,6 +74,9 @@ pub async fn start_sleep(
         ));
     }
 
+    // Apply vitals decay before entering sleep
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
     let beds = sqlx::query_as::<_, WorldObject>(
         r#"
         SELECT id, name, location_id, state, actions
@@ -264,6 +267,9 @@ pub async fn wake_up(
             "agent is not currently sleeping".to_string(),
         ));
     }
+
+    // Apply sleep recovery (sleep_level recovers, other vitals still decay)
+    let agent = crate::routes::vitals::apply_sleep_recovery_tx(&mut tx, &agent_id).await?;
 
     let occupied_beds = sqlx::query_as::<_, WorldObject>(
         r#"

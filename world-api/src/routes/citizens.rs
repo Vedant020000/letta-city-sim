@@ -892,6 +892,9 @@ async fn load_agent_wake_snapshot_tx(
     tx: &mut Transaction<'_, Postgres>,
     agent_id: &str,
 ) -> AppResult<Value> {
+    // Apply vitals decay before reading (uses the agent's current state + last_vitals_update)
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(tx, agent_id).await?;
+
     let snapshot = sqlx::query_as::<_, AgentWakeSnapshotRow>(
         r#"
         SELECT a.id, a.name, a.current_location_id, l.name AS location_name
@@ -905,18 +908,6 @@ async fn load_agent_wake_snapshot_tx(
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(AppError::NotFound)?;
-
-    // Enrich with vitals + balance
-    let vitals = sqlx::query_as::<_, (i64, i16, i16, i16, i16)>(
-        r#"
-        SELECT balance_cents, food_level, water_level, stamina_level, sleep_level
-        FROM agents
-        WHERE id = $1
-        "#,
-    )
-    .bind(agent_id)
-    .fetch_one(&mut **tx)
-    .await?;
 
     // Enrich with inventory
     let inventory: Vec<(String, String, i16, Option<String>)> = sqlx::query_as(
@@ -952,12 +943,12 @@ async fn load_agent_wake_snapshot_tx(
             "type": Value::Null,
             "name": snapshot.location_name,
         },
-        "balance_cents": vitals.0,
+        "balance_cents": agent.balance_cents,
         "vitals": {
-            "food_level": vitals.1,
-            "water_level": vitals.2,
-            "stamina_level": vitals.3,
-            "sleep_level": vitals.4,
+            "food_level": agent.food_level,
+            "water_level": agent.water_level,
+            "stamina_level": agent.stamina_level,
+            "sleep_level": agent.sleep_level,
         },
         "inventory": inventory_json,
     }))

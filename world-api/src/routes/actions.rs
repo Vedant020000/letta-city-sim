@@ -117,6 +117,33 @@ pub async fn action_move_to(
     AgentId(agent_id): AgentId,
     Json(payload): Json<UpdateAgentLocationRequest>,
 ) -> AppResult<Json<ApiResponse<Agent>>> {
+    // Apply vitals decay and check stamina before moving
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+    tx.commit().await?;
+
+    if agent.stamina_level < crate::routes::vitals::MOVE_STAMINA_COST {
+        return Err(AppError::BadRequest(
+            format!("not enough stamina to move (have {}, need {})", agent.stamina_level, crate::routes::vitals::MOVE_STAMINA_COST),
+        ));
+    }
+
+    // Deduct stamina cost
+    let mut tx = state.pool().begin().await?;
+    sqlx::query(
+        r#"
+        UPDATE agents
+        SET stamina_level = stamina_level - $1,
+            updated_at = NOW()
+        WHERE id = $2
+        "#,
+    )
+    .bind(crate::routes::vitals::MOVE_STAMINA_COST)
+    .bind(&agent_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
     let response = perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
     Ok(Json(response))
 }
@@ -463,6 +490,32 @@ pub async fn action_get_transaction_log(
     get_transaction_log(State(state), Path(agent_id), Json(payload)).await
 }
 
+#[derive(Debug, Serialize)]
+pub struct VitalsSnapshot {
+    pub food_level: i16,
+    pub water_level: i16,
+    pub stamina_level: i16,
+    pub sleep_level: i16,
+    pub balance_cents: i64,
+}
+
+pub async fn action_check_vitals(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<VitalsSnapshot>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(VitalsSnapshot {
+        food_level: agent.food_level,
+        water_level: agent.water_level,
+        stamina_level: agent.stamina_level,
+        sleep_level: agent.sleep_level,
+        balance_cents: agent.balance_cents,
+    })))
+}
+
 pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
@@ -595,6 +648,7 @@ pub async fn get_tool_manifest(
         tool_pay_agent(),
         tool_request_money(),
         tool_get_transaction_log(),
+        tool_check_vitals(),
     ];
     if has_sleep {
         tools.push(tool_sleep());
@@ -1072,6 +1126,20 @@ fn tool_get_transaction_log() -> WorldToolDefinition {
                     "maximum": 100
                 }
             },
+            "required": []
+        }),
+    }
+}
+
+fn tool_check_vitals() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_vitals".to_string(),
+        description: "Check your current vitals (food, water, stamina, sleep levels) and balance. Vitals decay over time, so this always returns up-to-date values.".to_string(),
+        endpoint: "/actions/check_vitals".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
             "required": []
         }),
     }

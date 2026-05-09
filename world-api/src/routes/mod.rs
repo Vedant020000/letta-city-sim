@@ -14,4 +14,5 @@ pub mod pathfind;
 pub mod pulse;
 pub mod sleep;
 pub mod tokens;
+pub mod vitals;
 pub mod world;
