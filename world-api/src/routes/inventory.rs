@@ -49,7 +49,7 @@ pub async fn get_agent_inventory(
 
     let items = sqlx::query_as::<_, InventoryItem>(
         r#"
-        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
         FROM inventory_items
         WHERE held_by = $1
         ORDER BY name
@@ -339,7 +339,7 @@ pub async fn use_item(
     // Get the item and verify ownership
     let item = sqlx::query_as::<_, InventoryItem>(
         r#"
-        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
         FROM inventory_items
         WHERE id = $1 AND held_by = $2
         FOR UPDATE

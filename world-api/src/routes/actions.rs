@@ -3,6 +3,7 @@
     extract::{Path, State},
 };
 use chrono::Utc;
+use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -316,7 +317,7 @@ pub async fn action_look_around(
 
     let items_on_ground = sqlx::query_as::<_, InventoryItem>(
         r#"
-        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
         FROM inventory_items
         WHERE location_id = $1
         ORDER BY name
@@ -527,6 +528,233 @@ pub async fn action_check_vitals(
         stamina_level: agent.stamina_level,
         sleep_level: agent.sleep_level,
         balance_cents: agent.balance_cents,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BuyItemRequest {
+    pub item_id: String,
+    pub quantity: Option<i16>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BuyItemResponse {
+    pub item_id: String,
+    pub item_name: String,
+    pub quantity_bought: i16,
+    pub total_cost_cents: i64,
+    pub new_balance_cents: i64,
+}
+
+pub async fn action_buy_item(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<BuyItemRequest>,
+) -> AppResult<Json<ApiResponse<BuyItemResponse>>> {
+    let buy_quantity = payload.quantity.unwrap_or(1).max(1);
+
+    let mut tx = state.pool().begin().await?;
+
+    // Apply vitals decay first
+    let buyer = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    // Fetch the item with FOR UPDATE
+    let item = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
+        FROM inventory_items
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(&payload.item_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    // Validate: item must be on the ground (for sale)
+    if item.held_by.is_some() {
+        return Err(AppError::BadRequest("item is not for sale".to_string()));
+    }
+    let item_location = item.location_id.as_deref().ok_or_else(|| {
+        AppError::BadRequest("item has no location".to_string())
+    })?;
+
+    // Validate: buyer must be at same location
+    if buyer.current_location_id != item_location {
+        return Err(AppError::BadRequest(
+            format!("you must be at {} to buy this item", item_location)
+        ));
+    }
+
+    // Validate: item must have a price
+    let price_per_unit = item.price_cents.ok_or_else(|| {
+        AppError::BadRequest("item is not for sale".to_string())
+    })?;
+
+    // Validate: enough quantity
+    if item.quantity < buy_quantity {
+        return Err(AppError::BadRequest(
+            format!("not enough stock (have {}, requested {})", item.quantity, buy_quantity)
+        ));
+    }
+
+    let total_cost = price_per_unit * buy_quantity as i64;
+
+    // Validate: buyer has enough balance
+    if buyer.balance_cents < total_cost {
+        return Err(AppError::BadRequest(
+            format!("insufficient balance (have ${:.2}, need ${:.2})", buyer.balance_cents as f64 / 100.0, total_cost as f64 / 100.0)
+        ));
+    }
+
+    // Debit buyer (with balance guard)
+    let new_balance = sqlx::query_scalar::<_, i64>(
+        r#"
+        UPDATE agents
+        SET balance_cents = balance_cents - $1,
+            last_expense_cents = $1,
+            last_expense_reason = 'Purchased item',
+            last_expense_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $2 AND balance_cents >= $1
+        RETURNING balance_cents
+        "#,
+    )
+    .bind(total_cost)
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::BadRequest("insufficient balance".to_string()))?;
+
+    // Credit shopkeeper (if one exists at this location)
+    let shopkeeper_id: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM agents
+        WHERE current_location_id = $1 AND occupation = 'Shopkeeper' AND is_active = TRUE
+        LIMIT 1
+        "#,
+    )
+    .bind(item_location)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if let Some(ref sk_id) = shopkeeper_id {
+        sqlx::query(
+            r#"
+            UPDATE agents
+            SET balance_cents = balance_cents + $1,
+                last_income_cents = $1,
+                last_income_reason = 'Shop sale',
+                last_income_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $2
+            "#,
+        )
+        .bind(total_cost)
+        .bind(sk_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Transfer item: either reduce quantity or fully transfer
+    if buy_quantity >= item.quantity {
+        // Buy all — transfer to buyer
+        sqlx::query(
+            r#"
+            UPDATE inventory_items
+            SET held_by = $1,
+                location_id = NULL,
+                price_cents = NULL,
+                quantity = $2
+            WHERE id = $3
+            "#,
+        )
+        .bind(&agent_id)
+        .bind(buy_quantity)
+        .bind(&payload.item_id)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        // Buy partial — reduce shelf quantity, create new item for buyer
+        sqlx::query(
+            r#"
+            UPDATE inventory_items
+            SET quantity = quantity - $1
+            WHERE id = $2
+            "#,
+        )
+        .bind(buy_quantity)
+        .bind(&payload.item_id)
+        .execute(&mut *tx)
+        .await?;
+
+        // Create new item in buyer's inventory
+        let new_item_id = format!("{}_{}", &item.id, Uuid::new_v4());
+        sqlx::query(
+            r#"
+            INSERT INTO inventory_items (id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents)
+            VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, NULL)
+            "#,
+        )
+        .bind(&new_item_id)
+        .bind(&item.name)
+        .bind(&agent_id)
+        .bind(&item.state)
+        .bind(buy_quantity)
+        .bind(&item.consumable_type)
+        .bind(&item.vital_value)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Create economy transaction record
+    let transaction_id = format!("txn_{}", Uuid::new_v4());
+    sqlx::query(
+        r#"
+        INSERT INTO economy_transactions (id, from_agent_id, to_agent_id, amount_cents, reason, transaction_type, status, location_id)
+        VALUES ($1, $2, $3, $4, $5, 'payment', 'completed', $6)
+        "#,
+    )
+    .bind(&transaction_id)
+    .bind(&agent_id)
+    .bind(shopkeeper_id.as_deref().unwrap_or("city_treasury"))
+    .bind(total_cost)
+    .bind(format!("Purchased {} x{}", item.name, buy_quantity))
+    .bind(item_location)
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.bought_item")
+    .bind(&agent_id)
+    .bind(item_location)
+    .bind(format!("Agent {} bought {} x{}", agent_id, item.name, buy_quantity))
+    .bind(serde_json::json!({
+        "item_id": &payload.item_id,
+        "item_name": &item.name,
+        "quantity": buy_quantity,
+        "total_cost_cents": total_cost,
+        "shopkeeper_id": shopkeeper_id,
+    }).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(BuyItemResponse {
+        item_id: payload.item_id,
+        item_name: item.name,
+        quantity_bought: buy_quantity,
+        total_cost_cents: total_cost,
+        new_balance_cents: new_balance,
     })))
 }
 
@@ -771,6 +999,23 @@ pub async fn get_tool_manifest(
     }
     if has_pending_money_requests {
         tools.push(tool_respond_money_request());
+    }
+
+    // Check for priced items at current location (shop shelves)
+    let has_priced_items = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM inventory_items
+            WHERE location_id = $1 AND price_cents IS NOT NULL AND held_by IS NULL
+        )
+        "#,
+    )
+    .bind(&agent_row.1)
+    .fetch_one(state.pool())
+    .await?;
+
+    if has_priced_items {
+        tools.push(tool_buy_item());
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -1254,6 +1499,29 @@ fn tool_check_vitals() -> WorldToolDefinition {
             "type": "object",
             "properties": {},
             "required": []
+        }),
+    }
+}
+
+fn tool_buy_item() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "buy_item".to_string(),
+        description: "Buy an item from a shop shelf. You must be at the same location as the item. Money is deducted from your balance and the item is added to your inventory.".to_string(),
+        endpoint: "/actions/buy_item".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "The ID of the item you want to buy."
+                },
+                "quantity": {
+                    "type": "integer",
+                    "description": "How many to buy (default: 1)."
+                }
+            },
+            "required": ["item_id"]
         }),
     }
 }

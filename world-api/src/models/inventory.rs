@@ -11,4 +11,5 @@ pub struct InventoryItem {
     pub quantity: i16,
     pub consumable_type: Option<String>,
     pub vital_value: Option<i16>,
+    pub price_cents: Option<i64>,
 }

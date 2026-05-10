@@ -16,8 +16,12 @@ VALUES
   ('ville_park_west', 'ville_park_east', 20),
   ('ville_park_west', 'notice_board', 5),
   ('notice_board', 'ville_park_west', 5),
-  ('ville_park_west', 'harvey_oak_floor', 90),
-  ('harvey_oak_floor', 'ville_park_west', 90),
+  ('ville_park_west', 'harvey_oak_entrance', 90),
+  ('harvey_oak_entrance', 'ville_park_west', 90),
+  ('harvey_oak_entrance', 'harvey_oak_aisle', 8),
+  ('harvey_oak_aisle', 'harvey_oak_entrance', 8),
+  ('harvey_oak_aisle', 'harvey_oak_checkout', 5),
+  ('harvey_oak_checkout', 'harvey_oak_aisle', 5),
   ('oak_classroom_a', 'oak_staff_office', 30),
   ('oak_staff_office', 'oak_classroom_a', 30),
   ('oak_staff_office', 'hobbs_cafe_seating', 180),
@@ -34,7 +38,7 @@ VALUES
   ('riverside_clinic_lobby', 'miller_community_garden', 45),
   ('riverside_clinic_lobby', 'ville_park_west', 55),
   ('ville_park_west', 'riverside_clinic_lobby', 55),
-  ('riverside_clinic_lobby', 'harvey_oak_floor', 75),
-  ('harvey_oak_floor', 'riverside_clinic_lobby', 75)
+  ('riverside_clinic_lobby', 'harvey_oak_entrance', 75),
+  ('harvey_oak_entrance', 'riverside_clinic_lobby', 75)
 ON CONFLICT (from_id, to_id) DO UPDATE
 SET travel_secs = EXCLUDED.travel_secs;

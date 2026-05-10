@@ -73,15 +73,29 @@ VALUES
     'sam_moore',
     'Sam Moore',
     'Shop Assistant',
-    'Punctual and practical, helps at Harvey Oak Supply.',
-    'harvey_oak_floor',
+    'Punctual and practical, helps at Harvey Oak Supermart.',
+    'harvey_oak_aisle',
     'working',
     'Organizing shop shelves',
     TRUE,
     TRUE,
     'placeholder_sam_moore',
     NULL,
-    'harvey_oak_floor'
+    'harvey_oak_aisle'
+  ),
+  (
+    'rosie_kim',
+    'Rosie Kim',
+    'Shopkeeper',
+    'Owns Harvey Oak Supermart. Warm but shrewd. Keeps the shelves stocked and the books balanced.',
+    'harvey_oak_checkout',
+    'working',
+    'Minding the checkout',
+    TRUE,
+    TRUE,
+    'placeholder_rosie_kim',
+    NULL,
+    'harvey_oak_checkout'
   ),
   (
     'abigail_chen',

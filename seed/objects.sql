@@ -7,20 +7,28 @@ VALUES
   ('notice_board_main', 'Notice Board', 'notice_board', '{"posts": []}', ARRAY['post', 'read']),
   ('bench_park_east', 'East Park Bench', 'ville_park_east', '{}', ARRAY['sit']),
   ('bench_park_west', 'West Park Bench', 'ville_park_west', '{}', ARRAY['sit']),
-  ('shop_counter_harvey', 'Harvey Oak Counter', 'harvey_oak_floor', '{}', ARRAY['buy', 'sell'])
+  ('shelf_food_harvey', 'Food Shelf', 'harvey_oak_aisle', '{"category": "food"}', ARRAY['browse', 'buy']),
+  ('shelf_drinks_harvey', 'Drinks Shelf', 'harvey_oak_aisle', '{"category": "drinks"}', ARRAY['browse', 'buy']),
+  ('shelf_supplies_harvey', 'Supplies Shelf', 'harvey_oak_aisle', '{"category": "supplies"}', ARRAY['browse', 'buy']),
+  ('checkout_counter_harvey', 'Checkout Counter', 'harvey_oak_checkout', '{"register_open": true}', ARRAY['buy'])
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     location_id = EXCLUDED.location_id,
     state = EXCLUDED.state,
     actions = EXCLUDED.actions;
 
-INSERT INTO inventory_items (id, name, held_by, location_id, state)
+INSERT INTO inventory_items (id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents)
 VALUES
-  ('coffee_beans_001', 'Coffee Beans', NULL, 'hobbs_cafe_kitchen', '{}'),
-  ('sheet_music_001', 'Sheet Music', NULL, 'lin_bedroom', '{}'),
-  ('paint_brush_001', 'Paint Brush', NULL, 'ville_park_west', '{}'),
-  ('notebook_001', 'Lecture Notebook', NULL, 'oak_classroom_a', '{}'),
-  ('apple_001', 'Apple', NULL, 'harvey_oak_floor', '{}')
+  ('coffee_beans_001', 'Coffee Beans', NULL, 'hobbs_cafe_kitchen', '{}', 1, NULL, NULL, NULL),
+  ('sheet_music_001', 'Sheet Music', NULL, 'lin_bedroom', '{}', 1, NULL, NULL, NULL),
+  ('paint_brush_001', 'Paint Brush', NULL, 'ville_park_west', '{}', 1, NULL, NULL, NULL),
+  ('notebook_001', 'Lecture Notebook', NULL, 'oak_classroom_a', '{}', 1, NULL, NULL, NULL),
+  ('bread_001', 'Bread Loaf', NULL, 'harvey_oak_aisle', '{}', 5, 'food', 25, 150),
+  ('sandwich_001', 'Sandwich', NULL, 'harvey_oak_aisle', '{}', 3, 'food', 40, 350),
+  ('apple_001', 'Apple', NULL, 'harvey_oak_aisle', '{}', 5, 'food', 15, 100),
+  ('water_bottle_001', 'Water Bottle', NULL, 'harvey_oak_aisle', '{}', 5, 'water', 30, 150),
+  ('coffee_can_001', 'Coffee Can', NULL, 'harvey_oak_aisle', '{}', 3, 'stamina', 20, 400),
+  ('energy_bar_001', 'Energy Bar', NULL, 'harvey_oak_aisle', '{}', 4, 'stamina', 25, 250)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     held_by = EXCLUDED.held_by,
