@@ -10,7 +10,8 @@ VALUES
   ('shelf_food_harvey', 'Food Shelf', 'harvey_oak_aisle', '{"category": "food"}', ARRAY['browse', 'buy']),
   ('shelf_drinks_harvey', 'Drinks Shelf', 'harvey_oak_aisle', '{"category": "drinks"}', ARRAY['browse', 'buy']),
   ('shelf_supplies_harvey', 'Supplies Shelf', 'harvey_oak_aisle', '{"category": "supplies"}', ARRAY['browse', 'buy']),
-  ('checkout_counter_harvey', 'Checkout Counter', 'harvey_oak_checkout', '{"register_open": true}', ARRAY['buy'])
+  ('checkout_counter_harvey', 'Checkout Counter', 'harvey_oak_checkout', '{"register_open": true, "last_cleaned_at": null}', ARRAY['buy']),
+  ('delivery_crate_harvey', 'Delivery Crate', 'harvey_oak_checkout', '{"delivery_pending": false}', ARRAY['receive'])
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     location_id = EXCLUDED.location_id,
@@ -28,7 +29,10 @@ VALUES
   ('apple_001', 'Apple', NULL, 'harvey_oak_aisle', '{}', 5, 'food', 15, 100),
   ('water_bottle_001', 'Water Bottle', NULL, 'harvey_oak_aisle', '{}', 5, 'water', 30, 150),
   ('coffee_can_001', 'Coffee Can', NULL, 'harvey_oak_aisle', '{}', 3, 'stamina', 20, 400),
-  ('energy_bar_001', 'Energy Bar', NULL, 'harvey_oak_aisle', '{}', 4, 'stamina', 25, 250)
+  ('energy_bar_001', 'Energy Bar', NULL, 'harvey_oak_aisle', '{}', 4, 'stamina', 25, 250),
+  ('backroom_bread_001', 'Bread Loaf', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 150}', 5, 'food', 25, NULL),
+  ('backroom_water_001', 'Water Bottle', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 150}', 5, 'water', 30, NULL),
+  ('backroom_apple_001', 'Apple', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 100}', 5, 'food', 15, NULL)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     held_by = EXCLUDED.held_by,

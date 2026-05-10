@@ -23,6 +23,7 @@ use error::AppResult;
 use routes::actions::{
     action_accept_invitation, action_accept_join_request, action_board_post, action_check_balance,
     action_cook_food, action_buy_item, action_check_vitals, action_complete_intention, action_drop_item,
+    action_check_shelf_stock, action_restock_shelf, action_receive_delivery, action_order_delivery, action_clean_shop,
     action_get_intention, action_get_inventory, action_get_transaction_log,
     action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
     action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
@@ -120,6 +121,11 @@ async fn main() -> AppResult<()> {
         .route("/actions/get_transaction_log", post(action_get_transaction_log))
         .route("/actions/check_vitals", post(action_check_vitals))
         .route("/actions/buy_item", post(action_buy_item))
+        .route("/actions/check_shelf_stock", post(action_check_shelf_stock))
+        .route("/actions/restock_shelf", post(action_restock_shelf))
+        .route("/actions/receive_delivery", post(action_receive_delivery))
+        .route("/actions/order_delivery", post(action_order_delivery))
+        .route("/actions/clean_shop", post(action_clean_shop))
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))

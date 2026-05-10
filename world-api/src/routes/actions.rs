@@ -760,6 +760,592 @@ pub async fn action_buy_item(
     })))
 }
 
+// ---------------------------------------------------------------------------
+// Shopkeeper tools
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct ShelfStockResponse {
+    pub shelf_items: Vec<InventoryItem>,
+    pub backroom_items: Vec<InventoryItem>,
+    pub pending_deliveries: Vec<WorldObject>,
+    pub shop_balance_cents: i64,
+}
+
+pub async fn action_check_shelf_stock(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<ShelfStockResponse>>> {
+    let location_prefix = sqlx::query_scalar::<_, String>(
+        r#"SELECT current_location_id FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(state.pool())
+    .await?;
+
+    let prefix = location_prefix.split('_').take(2).collect::<Vec<_>>().join("_");
+
+    // Shelf items (priced, on aisle)
+    let shelf_items = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
+        FROM inventory_items
+        WHERE location_id LIKE $1 AND price_cents IS NOT NULL AND held_by IS NULL
+        ORDER BY name
+        "#,
+    )
+    .bind(format!("{}%", prefix))
+    .fetch_all(state.pool())
+    .await?;
+
+    // Backroom items (at checkout, backroom flag, no price)
+    let backroom_items = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
+        FROM inventory_items
+        WHERE location_id LIKE $1 AND price_cents IS NULL AND held_by IS NULL
+          AND state->>'backroom' = 'true'
+        ORDER BY name
+        "#,
+    )
+    .bind(format!("{}%", prefix))
+    .fetch_all(state.pool())
+    .await?;
+
+    // Pending deliveries
+    let pending_deliveries = sqlx::query_as::<_, WorldObject>(
+        r#"
+        SELECT id, name, location_id, state, actions
+        FROM world_objects
+        WHERE location_id LIKE $1 AND state->>'delivery_pending' = 'true'
+        ORDER BY name
+        "#,
+    )
+    .bind(format!("{}%", prefix))
+    .fetch_all(state.pool())
+    .await?;
+
+    // Shop balance (shopkeeper's balance)
+    let shop_balance_cents = sqlx::query_scalar::<_, i64>(
+        r#"SELECT balance_cents FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(state.pool())
+    .await?;
+
+    Ok(Json(ApiResponse::from(ShelfStockResponse {
+        shelf_items,
+        backroom_items,
+        pending_deliveries,
+        shop_balance_cents,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RestockShelfRequest {
+    pub item_id: String,
+    pub shelf_price_cents: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RestockShelfResponse {
+    pub item_id: String,
+    pub item_name: String,
+    pub quantity: i16,
+    pub shelf_price_cents: i64,
+}
+
+pub async fn action_restock_shelf(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<RestockShelfRequest>,
+) -> AppResult<Json<ApiResponse<RestockShelfResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Fetch the backroom item with FOR UPDATE
+    let item = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
+        FROM inventory_items
+        WHERE id = $1 AND held_by IS NULL AND price_cents IS NULL AND state->>'backroom' = 'true'
+        FOR UPDATE
+        "#,
+    )
+    .bind(&payload.item_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("item not found in backroom".to_string()))?;
+
+    // Verify agent is at the same shop
+    let agent_loc = sqlx::query_scalar::<_, String>(
+        r#"SELECT current_location_id FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let prefix = agent_loc.split('_').take(2).collect::<Vec<_>>().join("_");
+    let item_prefix = item.location_id.as_deref().unwrap_or("").split('_').take(2).collect::<Vec<_>>().join("_");
+    if prefix != item_prefix {
+        return Err(AppError::BadRequest("item is not at your shop".to_string()));
+    }
+
+    // Get the aisle location for this shop
+    let aisle_location = format!("{}_aisle", prefix);
+
+    // Move item to aisle, set price, remove backroom flag
+    let restock_price = item.state.get("restock_price")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(payload.shelf_price_cents);
+
+    let updated = sqlx::query(
+        r#"
+        UPDATE inventory_items
+        SET location_id = $1,
+            price_cents = $2,
+            state = state - 'backroom' - 'restock_price'
+        WHERE id = $3
+        "#,
+    )
+    .bind(&aisle_location)
+    .bind(restock_price)
+    .bind(&payload.item_id)
+    .execute(&mut *tx)
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::BadRequest("failed to restock item".to_string()));
+    }
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.restocked_shelf")
+    .bind(&agent_id)
+    .bind(&aisle_location)
+    .bind(format!("Agent {} restocked {} x{}", agent_id, item.name, item.quantity))
+    .bind(serde_json::json!({"item_id": &payload.item_id, "item_name": &item.name, "quantity": item.quantity, "price_cents": restock_price}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(RestockShelfResponse {
+        item_id: payload.item_id,
+        item_name: item.name,
+        quantity: item.quantity,
+        shelf_price_cents: restock_price,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReceiveDeliveryRequest {
+    pub delivery_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReceiveDeliveryResponse {
+    pub delivery_id: String,
+    pub items_received: Vec<String>,
+    pub total_cost_cents: i64,
+}
+
+pub async fn action_receive_delivery(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<ReceiveDeliveryRequest>,
+) -> AppResult<Json<ApiResponse<ReceiveDeliveryResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Fetch the delivery object with FOR UPDATE
+    let delivery = sqlx::query_as::<_, WorldObject>(
+        r#"
+        SELECT id, name, location_id, state, actions
+        FROM world_objects
+        WHERE id = $1 AND state->>'delivery_pending' = 'true'
+        FOR UPDATE
+        "#,
+    )
+    .bind(&payload.delivery_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no pending delivery found".to_string()))?;
+
+    // Verify agent is at same shop
+    let agent_loc = sqlx::query_scalar::<_, String>(
+        r#"SELECT current_location_id FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let prefix = agent_loc.split('_').take(2).collect::<Vec<_>>().join("_");
+    let delivery_prefix = delivery.location_id.as_deref().unwrap_or("").split('_').take(2).collect::<Vec<_>>().join("_");
+    if prefix != delivery_prefix {
+        return Err(AppError::BadRequest("delivery is not at your shop".to_string()));
+    }
+
+    // Parse the manifest
+    let items_manifest = delivery.state.get("items")
+        .and_then(|v| v.as_array())
+        .ok_or(AppError::BadRequest("delivery has no items manifest".to_string()))?;
+
+    let total_cost: i64 = delivery.state.get("total_cost_cents")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    // Check shopkeeper balance
+    let balance = sqlx::query_scalar::<_, i64>(
+        r#"SELECT balance_cents FROM agents WHERE id = $1 FOR UPDATE"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if balance < total_cost {
+        return Err(AppError::BadRequest(
+            format!("insufficient balance for delivery (have ${:.2}, need ${:.2})", balance as f64 / 100.0, total_cost as f64 / 100.0)
+        ));
+    }
+
+    // Deduct cost from shopkeeper
+    if total_cost > 0 {
+        sqlx::query(
+            r#"
+            UPDATE agents SET balance_cents = balance_cents - $1,
+                last_expense_cents = $1,
+                last_expense_reason = 'Delivery received',
+                last_expense_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $2 AND balance_cents >= $1
+            "#,
+        )
+        .bind(total_cost)
+        .bind(&agent_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Create backroom items from manifest
+    let checkout_location = format!("{}_checkout", prefix);
+    let mut items_received = Vec::new();
+
+    for (i, item_def) in items_manifest.iter().enumerate() {
+        let name = item_def.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown Item");
+        let quantity = item_def.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1) as i16;
+        let consumable_type = item_def.get("consumable_type").and_then(|v| v.as_str());
+        let vital_value = item_def.get("vital_value").and_then(|v| v.as_i64()).map(|v| v as i16);
+        let restock_price = item_def.get("cost_cents").and_then(|v| v.as_i64())
+            .map(|c| (c as f64 * 2.0) as i64); // 2x markup for shelf price
+
+        let item_id = format!("br_{}_{}", &payload.delivery_id, i);
+        let state = serde_json::json!({
+            "backroom": true,
+            "restock_price": restock_price,
+            "from_delivery": &payload.delivery_id,
+        });
+
+        sqlx::query(
+            r#"
+            INSERT INTO inventory_items (id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents)
+            VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, NULL)
+            "#,
+        )
+        .bind(&item_id)
+        .bind(name)
+        .bind(&checkout_location)
+        .bind(state.to_string())
+        .bind(quantity)
+        .bind(consumable_type)
+        .bind(vital_value)
+        .execute(&mut *tx)
+        .await?;
+
+        items_received.push(format!("{} x{}", name, quantity));
+    }
+
+    // Mark delivery as received
+    sqlx::query(
+        r#"
+        UPDATE world_objects
+        SET state = jsonb_set(
+            state - 'delivery_pending' || '{"delivery_pending": false}',
+            '{received_at}',
+            to_jsonb(NOW()::text)
+        )
+        WHERE id = $1
+        "#,
+    )
+    .bind(&payload.delivery_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.received_delivery")
+    .bind(&agent_id)
+    .bind(&checkout_location)
+    .bind(format!("Agent {} received delivery", agent_id))
+    .bind(serde_json::json!({"delivery_id": &payload.delivery_id, "items": items_received, "cost_cents": total_cost}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(ReceiveDeliveryResponse {
+        delivery_id: payload.delivery_id,
+        items_received,
+        total_cost_cents: total_cost,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OrderDeliveryItem {
+    pub name: String,
+    pub quantity: i16,
+    pub consumable_type: Option<String>,
+    pub vital_value: Option<i16>,
+    pub cost_cents: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OrderDeliveryRequest {
+    pub items: Vec<OrderDeliveryItem>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrderDeliveryResponse {
+    pub delivery_id: String,
+    pub items_ordered: Vec<String>,
+    pub total_cost_cents: i64,
+    pub estimated_arrival: String,
+}
+
+pub async fn action_order_delivery(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<OrderDeliveryRequest>,
+) -> AppResult<Json<ApiResponse<OrderDeliveryResponse>>> {
+    if payload.items.is_empty() {
+        return Err(AppError::BadRequest("must order at least one item".to_string()));
+    }
+
+    let mut tx = state.pool().begin().await?;
+
+    // Verify agent is at a shop
+    let agent_loc = sqlx::query_scalar::<_, String>(
+        r#"SELECT current_location_id FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let prefix = agent_loc.split('_').take(2).collect::<Vec<_>>().join("_");
+
+    // Check no pending delivery already exists
+    let has_pending = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM world_objects
+            WHERE location_id LIKE $1 AND state->>'delivery_pending' = 'true'
+        )
+        "#,
+    )
+    .bind(format!("{}%", prefix))
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if has_pending {
+        return Err(AppError::BadRequest("a delivery is already pending — receive it first".to_string()));
+    }
+
+    // Calculate total cost
+    let total_cost: i64 = payload.items.iter().map(|i| i.cost_cents * i.quantity as i64).sum();
+
+    // Check balance
+    let balance = sqlx::query_scalar::<_, i64>(
+        r#"SELECT balance_cents FROM agents WHERE id = $1 FOR UPDATE"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if balance < total_cost {
+        return Err(AppError::BadRequest(
+            format!("insufficient balance (have ${:.2}, need ${:.2})", balance as f64 / 100.0, total_cost as f64 / 100.0)
+        ));
+    }
+
+    // Deduct cost
+    if total_cost > 0 {
+        sqlx::query(
+            r#"
+            UPDATE agents SET balance_cents = balance_cents - $1,
+                last_expense_cents = $1,
+                last_expense_reason = 'Delivery ordered',
+                last_expense_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $2 AND balance_cents >= $1
+            "#,
+        )
+        .bind(total_cost)
+        .bind(&agent_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Create delivery object
+    let checkout_location = format!("{}_checkout", prefix);
+    let delivery_id = format!("delivery_{}", Uuid::new_v4());
+
+    let items_json: Vec<serde_json::Value> = payload.items.iter().map(|i| {
+        serde_json::json!({
+            "name": i.name,
+            "quantity": i.quantity,
+            "consumable_type": i.consumable_type,
+            "vital_value": i.vital_value,
+            "cost_cents": i.cost_cents,
+        })
+    }).collect();
+
+    let items_ordered: Vec<String> = payload.items.iter()
+        .map(|i| format!("{} x{}", i.name, i.quantity))
+        .collect();
+
+    sqlx::query(
+        r#"
+        INSERT INTO world_objects (id, name, location_id, state, actions)
+        VALUES ($1, 'Delivery Crate', $2, $3, ARRAY['receive'])
+        "#,
+    )
+    .bind(&delivery_id)
+    .bind(&checkout_location)
+    .bind(serde_json::json!({
+        "delivery_pending": true,
+        "items": items_json,
+        "total_cost_cents": total_cost,
+        "ordered_by": agent_id,
+        "ordered_at": Utc::now().to_rfc3339(),
+    }).to_string())
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.ordered_delivery")
+    .bind(&agent_id)
+    .bind(&checkout_location)
+    .bind(format!("Agent {} ordered delivery", agent_id))
+    .bind(serde_json::json!({"delivery_id": &delivery_id, "items": items_ordered, "cost_cents": total_cost}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(OrderDeliveryResponse {
+        delivery_id,
+        items_ordered,
+        total_cost_cents: total_cost,
+        estimated_arrival: "immediate".to_string(),
+    })))
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanShopResponse {
+    pub location_cleaned: String,
+    pub stamina_cost: i16,
+    pub last_cleaned_at: String,
+}
+
+pub async fn action_clean_shop(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<CleanShopResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Apply vitals decay and check stamina
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+    let stamina_cost: i16 = 10;
+
+    if agent.stamina_level < stamina_cost {
+        return Err(AppError::BadRequest(
+            format!("not enough stamina to clean (have {}, need {})", agent.stamina_level, stamina_cost)
+        ));
+    }
+
+    // Deduct stamina
+    sqlx::query(
+        r#"
+        UPDATE agents SET stamina_level = stamina_level - $1, updated_at = NOW()
+        WHERE id = $2 AND stamina_level >= $1
+        "#,
+    )
+    .bind(stamina_cost)
+    .bind(&agent_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Update the checkout counter's last_cleaned_at
+    let prefix = agent.current_location_id.split('_').take(2).collect::<Vec<_>>().join("_");
+    let counter_id = format!("{}_counter_{}", prefix, prefix.split('_').last().unwrap_or("harvey"));
+
+    // Try to find the counter object at this shop
+    let now_str = Utc::now().to_rfc3339();
+    sqlx::query(
+        r#"
+        UPDATE world_objects
+        SET state = jsonb_set(state, '{last_cleaned_at}', $1::jsonb)
+        WHERE id LIKE $2 AND location_id LIKE $3
+        "#,
+    )
+    .bind(format!("\"{}\"", now_str))
+    .bind(format!("{}%", prefix))
+    .bind(format!("{}%", prefix))
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.cleaned_shop")
+    .bind(&agent_id)
+    .bind(&agent.current_location_id)
+    .bind(format!("Agent {} cleaned the shop", agent_id))
+    .bind("{}")
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(CleanShopResponse {
+        location_cleaned: agent.current_location_id,
+        stamina_cost,
+        last_cleaned_at: now_str,
+    })))
+}
+
 pub async fn action_set_intention(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
@@ -843,9 +1429,9 @@ pub async fn get_tool_manifest(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> AppResult<Json<ApiResponse<ToolManifestResponse>>> {
-    let agent_row = sqlx::query_as::<_, (String, String, String, String)>(
+    let agent_row = sqlx::query_as::<_, (String, String, String, String, String)>(
         r#"
-        SELECT a.id, a.current_location_id, l.name, a.state
+        SELECT a.id, a.current_location_id, l.name, a.state, a.occupation
         FROM agents a
         JOIN locations l ON l.id = a.current_location_id
         WHERE a.id = $1 OR a.letta_agent_id = $1
@@ -1018,6 +1604,54 @@ pub async fn get_tool_manifest(
 
     if has_priced_items {
         tools.push(tool_buy_item());
+    }
+
+    // Shopkeeper tools — only for agents with occupation 'Shopkeeper' at a shop location
+    let is_shopkeeper = agent_row.4 == "Shopkeeper";
+    let at_shop = agent_row.1.starts_with("harvey_oak_");
+
+    if is_shopkeeper && at_shop {
+        // Always available for shopkeepers at their shop
+        tools.push(tool_check_shelf_stock());
+        tools.push(tool_clean_shop());
+
+        // Conditional: restock when backroom items exist
+        let location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
+        let has_backroom_items = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM inventory_items
+                WHERE location_id LIKE $1 AND price_cents IS NULL AND held_by IS NULL
+                  AND state->>'backroom' = 'true'
+            )
+            "#,
+        )
+        .bind(format!("{}%", location_prefix))
+        .fetch_one(state.pool())
+        .await?;
+
+        if has_backroom_items {
+            tools.push(tool_restock_shelf());
+        }
+
+        // Conditional: receive_delivery when pending delivery exists
+        let has_pending_delivery = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM world_objects
+                WHERE location_id LIKE $1 AND state->>'delivery_pending' = 'true'
+            )
+            "#,
+        )
+        .bind(format!("{}%", location_prefix))
+        .fetch_one(state.pool())
+        .await?;
+
+        if has_pending_delivery {
+            tools.push(tool_receive_delivery());
+        } else {
+            tools.push(tool_order_delivery());
+        }
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -1524,6 +2158,106 @@ fn tool_buy_item() -> WorldToolDefinition {
                 }
             },
             "required": ["item_id"]
+        }),
+    }
+}
+
+fn tool_check_shelf_stock() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_shelf_stock".to_string(),
+        description: "Check what's on the shop shelves, what's in the backroom, pending deliveries, and your shop balance. Shopkeeper only.".to_string(),
+        endpoint: "/actions/check_shelf_stock".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
+fn tool_restock_shelf() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "restock_shelf".to_string(),
+        description: "Move an item from the backroom to the shop shelf and set its price. Shopkeeper only.".to_string(),
+        endpoint: "/actions/restock_shelf".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "The ID of the backroom item to restock."
+                },
+                "shelf_price_cents": {
+                    "type": "integer",
+                    "description": "The price in cents to sell this item for. If the item has a restock_price, that will be used instead."
+                }
+            },
+            "required": ["item_id", "shelf_price_cents"]
+        }),
+    }
+}
+
+fn tool_receive_delivery() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "receive_delivery".to_string(),
+        description: "Receive a pending delivery crate, unpack items into the backroom, and pay the delivery cost. Shopkeeper only.".to_string(),
+        endpoint: "/actions/receive_delivery".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "delivery_id": {
+                    "type": "string",
+                    "description": "The ID of the delivery crate to receive."
+                }
+            },
+            "required": ["delivery_id"]
+        }),
+    }
+}
+
+fn tool_order_delivery() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "order_delivery".to_string(),
+        description: "Order a new delivery of supplies. Items will arrive as a crate at the checkout. You pay the wholesale cost upfront. Shopkeeper only.".to_string(),
+        endpoint: "/actions/order_delivery".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "description": "List of items to order.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Item name"},
+                            "quantity": {"type": "integer", "description": "How many"},
+                            "consumable_type": {"type": "string", "description": "food, water, or stamina"},
+                            "vital_value": {"type": "integer", "description": "How much vital boost this item gives"},
+                            "cost_cents": {"type": "integer", "description": "Wholesale cost per unit in cents"}
+                        },
+                        "required": ["name", "quantity", "cost_cents"]
+                    }
+                }
+            },
+            "required": ["items"]
+        }),
+    }
+}
+
+fn tool_clean_shop() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "clean_shop".to_string(),
+        description: "Clean the shop. Costs 10 stamina. Shopkeeper only.".to_string(),
+        endpoint: "/actions/clean_shop".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
         }),
     }
 }
