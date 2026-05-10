@@ -24,5 +24,7 @@ pub struct Agent {
     pub water_level: i16,
     pub stamina_level: i16,
     pub sleep_level: i16,
+    pub hygiene_level: i16,
+    pub appearance_level: i16,
     pub last_vitals_update: DateTime<Utc>,
 }

@@ -9,6 +9,8 @@ const FOOD_DECAY_PER_MIN: f64 = 0.5;
 const WATER_DECAY_PER_MIN: f64 = 0.7;
 const STAMINA_DECAY_PER_MIN: f64 = 0.3;
 const SLEEP_DECAY_PER_MIN: f64 = 0.2;
+const HYGIENE_DECAY_PER_MIN: f64 = 0.2;
+const APPEARANCE_DECAY_PER_MIN: f64 = 0.15;
 
 /// Sleep recovery rate per minute
 const SLEEP_RECOVERY_PER_MIN: f64 = 2.0;
@@ -82,6 +84,11 @@ async fn apply_decay_inner(
     let new_water = ((agent.water_level as f64) - WATER_DECAY_PER_MIN * elapsed).round().clamp(0.0, 100.0) as i16;
     let new_stamina = ((agent.stamina_level as f64) - STAMINA_DECAY_PER_MIN * elapsed).round().clamp(0.0, 100.0) as i16;
     let new_sleep = ((agent.sleep_level as f64) - SLEEP_DECAY_PER_MIN * elapsed).round().clamp(0.0, 100.0) as i16;
+    let new_hygiene = ((agent.hygiene_level as f64) - HYGIENE_DECAY_PER_MIN * elapsed).round().clamp(0.0, 100.0) as i16;
+
+    // Appearance decays faster when hygiene is low, slower when hygiene is high
+    let appearance_modifier = if agent.hygiene_level < 20 { 2.0 } else if agent.hygiene_level > 80 { 0.5 } else { 1.0 };
+    let new_appearance = ((agent.appearance_level as f64) - APPEARANCE_DECAY_PER_MIN * appearance_modifier * elapsed).round().clamp(0.0, 100.0) as i16;
 
     let updated = sqlx::query_as::<_, Agent>(
         r#"
@@ -90,9 +97,11 @@ async fn apply_decay_inner(
             water_level = $2,
             stamina_level = $3,
             sleep_level = $4,
-            last_vitals_update = $5,
-            updated_at = $5
-        WHERE id = $6
+            hygiene_level = $5,
+            appearance_level = $6,
+            last_vitals_update = $7,
+            updated_at = $7
+        WHERE id = $8
         RETURNING *
         "#,
     )
@@ -100,6 +109,8 @@ async fn apply_decay_inner(
     .bind(new_water)
     .bind(new_stamina)
     .bind(new_sleep)
+    .bind(new_hygiene)
+    .bind(new_appearance)
     .bind(now)
     .bind(&agent.id)
     .fetch_one(&mut **tx)
@@ -126,6 +137,11 @@ async fn apply_sleep_recovery_inner(
     let new_stamina = ((agent.stamina_level as f64) - STAMINA_DECAY_PER_MIN * elapsed).round().clamp(0.0, 100.0) as i16;
     // Sleep level recovers while sleeping
     let new_sleep = ((agent.sleep_level as f64) + SLEEP_RECOVERY_PER_MIN * elapsed).round().clamp(0.0, 100.0) as i16;
+    // Hygiene decays slower while sleeping
+    let new_hygiene = ((agent.hygiene_level as f64) - HYGIENE_DECAY_PER_MIN * 0.5 * elapsed).round().clamp(0.0, 100.0) as i16;
+    // Appearance decays slower while sleeping
+    let appearance_modifier = if agent.hygiene_level < 20 { 2.0 } else if agent.hygiene_level > 80 { 0.5 } else { 1.0 };
+    let new_appearance = ((agent.appearance_level as f64) - APPEARANCE_DECAY_PER_MIN * appearance_modifier * 0.5 * elapsed).round().clamp(0.0, 100.0) as i16;
 
     let updated = sqlx::query_as::<_, Agent>(
         r#"
@@ -134,9 +150,11 @@ async fn apply_sleep_recovery_inner(
             water_level = $2,
             stamina_level = $3,
             sleep_level = $4,
-            last_vitals_update = $5,
-            updated_at = $5
-        WHERE id = $6
+            hygiene_level = $5,
+            appearance_level = $6,
+            last_vitals_update = $7,
+            updated_at = $7
+        WHERE id = $8
         RETURNING *
         "#,
     )
@@ -144,6 +162,8 @@ async fn apply_sleep_recovery_inner(
     .bind(new_water)
     .bind(new_stamina)
     .bind(new_sleep)
+    .bind(new_hygiene)
+    .bind(new_appearance)
     .bind(now)
     .bind(&agent.id)
     .fetch_one(&mut **tx)

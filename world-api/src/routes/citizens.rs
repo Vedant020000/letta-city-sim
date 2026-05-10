@@ -956,6 +956,8 @@ async fn load_agent_wake_snapshot_tx(
             "water_level": agent.water_level,
             "stamina_level": agent.stamina_level,
             "sleep_level": agent.sleep_level,
+            "hygiene_level": agent.hygiene_level,
+            "appearance_level": agent.appearance_level,
         },
         "inventory": inventory_json,
     }))

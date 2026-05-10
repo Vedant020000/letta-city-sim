@@ -377,20 +377,29 @@ pub async fn use_item(
             "sleep" => {
                 agent.sleep_level = (agent.sleep_level + vital_boost).min(100);
             }
+            "hygiene" => {
+                agent.hygiene_level = (agent.hygiene_level + vital_boost).min(100);
+            }
+            "appearance" => {
+                agent.appearance_level = (agent.appearance_level + vital_boost).min(100);
+            }
             _ => {}
         }
 
         sqlx::query(
             r#"
             UPDATE agents
-            SET food_level = $1, water_level = $2, stamina_level = $3, sleep_level = $4, updated_at = NOW()
-            WHERE id = $5
+            SET food_level = $1, water_level = $2, stamina_level = $3, sleep_level = $4,
+                hygiene_level = $5, appearance_level = $6, updated_at = NOW()
+            WHERE id = $7
             "#,
         )
         .bind(agent.food_level)
         .bind(agent.water_level)
         .bind(agent.stamina_level)
         .bind(agent.sleep_level)
+        .bind(agent.hygiene_level)
+        .bind(agent.appearance_level)
         .bind(&agent_id)
         .execute(&mut *tx)
         .await?;

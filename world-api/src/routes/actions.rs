@@ -63,6 +63,8 @@ pub struct LookAroundAgent {
     pub name: String,
     pub state: String,
     pub current_activity: Option<String>,
+    pub hygiene_level: i16,
+    pub appearance_level: i16,
 }
 
 #[derive(Debug, Serialize)]
@@ -306,7 +308,7 @@ pub async fn action_look_around(
 
     let agents_present = sqlx::query_as::<_, LookAroundAgent>(
         r#"
-        SELECT id, name, state, current_activity
+        SELECT id, name, state, current_activity, hygiene_level, appearance_level
         FROM agents
         WHERE current_location_id = $1
           AND id != $2
@@ -514,6 +516,8 @@ pub struct VitalsSnapshot {
     pub water_level: i16,
     pub stamina_level: i16,
     pub sleep_level: i16,
+    pub hygiene_level: i16,
+    pub appearance_level: i16,
     pub balance_cents: i64,
 }
 
@@ -530,6 +534,8 @@ pub async fn action_check_vitals(
         water_level: agent.water_level,
         stamina_level: agent.stamina_level,
         sleep_level: agent.sleep_level,
+        hygiene_level: agent.hygiene_level,
+        appearance_level: agent.appearance_level,
         balance_cents: agent.balance_cents,
     })))
 }
@@ -2937,6 +2943,379 @@ pub async fn action_close_election(
     }))))
 }
 
+// ---------------------------------------------------------------------------
+// Hygiene & appearance actions
+// ---------------------------------------------------------------------------
+
+/// Helper: check if location has water access for washing
+fn has_water_access(location_id: &str) -> bool {
+    location_id.starts_with("lin_")
+        || location_id.starts_with("hobbs_cafe_")
+        || location_id.starts_with("riverside_clinic_")
+        || location_id.starts_with("ville_park_")
+        || location_id.starts_with("miller_community_garden")
+}
+
+/// Helper: check if location is a home (for shower/get_ready)
+fn is_home_location(location_id: &str) -> bool {
+    location_id.starts_with("lin_")
+}
+
+/// Helper: check if location allows bathing/swimming
+fn is_bathing_location(location_id: &str) -> bool {
+    location_id.starts_with("ville_park_")
+        || location_id == "miller_community_garden"
+}
+
+#[derive(Debug, Serialize)]
+pub struct HygieneActionResponse {
+    pub hygiene_level: i16,
+    pub appearance_level: i16,
+    pub stamina_level: i16,
+    pub message: String,
+}
+
+pub async fn action_wash_up(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if !has_water_access(&agent.current_location_id) {
+        return Err(AppError::BadRequest("you need to be somewhere with water access to wash up (home, cafe, clinic, or park)".to_string()));
+    }
+
+    if agent.stamina_level < 5 {
+        return Err(AppError::BadRequest("not enough stamina to wash up (need 5)".to_string()));
+    }
+
+    let new_hygiene = (agent.hygiene_level + 15).min(100);
+    let new_appearance = (agent.appearance_level + 5).min(100);
+    let new_stamina = agent.stamina_level - 5;
+
+    sqlx::query(
+        r#"UPDATE agents SET hygiene_level = $1, appearance_level = $2, stamina_level = $3, updated_at = NOW() WHERE id = $4"#,
+    )
+    .bind(new_hygiene).bind(new_appearance).bind(new_stamina).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: new_hygiene,
+        appearance_level: new_appearance,
+        stamina_level: new_stamina,
+        message: "You wash your face and hands. Feeling fresher!".to_string(),
+    })))
+}
+
+pub async fn action_shower(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if !is_home_location(&agent.current_location_id) {
+        return Err(AppError::BadRequest("you can only shower at home".to_string()));
+    }
+
+    if agent.stamina_level < 15 {
+        return Err(AppError::BadRequest("not enough stamina to shower (need 15)".to_string()));
+    }
+
+    let new_hygiene = (agent.hygiene_level + 50).min(100);
+    let new_appearance = (agent.appearance_level + 15).min(100);
+    let new_stamina = agent.stamina_level - 15;
+
+    sqlx::query(
+        r#"UPDATE agents SET hygiene_level = $1, appearance_level = $2, stamina_level = $3, updated_at = NOW() WHERE id = $4"#,
+    )
+    .bind(new_hygiene).bind(new_appearance).bind(new_stamina).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: new_hygiene,
+        appearance_level: new_appearance,
+        stamina_level: new_stamina,
+        message: "You take a nice warm shower. Much better!".to_string(),
+    })))
+}
+
+pub async fn action_brush_teeth(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if !is_home_location(&agent.current_location_id) {
+        return Err(AppError::BadRequest("you can only brush your teeth at home".to_string()));
+    }
+
+    if agent.stamina_level < 2 {
+        return Err(AppError::BadRequest("not enough stamina to brush your teeth (need 2)".to_string()));
+    }
+
+    let new_hygiene = (agent.hygiene_level + 10).min(100);
+    let new_stamina = agent.stamina_level - 2;
+
+    sqlx::query(
+        r#"UPDATE agents SET hygiene_level = $1, stamina_level = $2, updated_at = NOW() WHERE id = $3"#,
+    )
+    .bind(new_hygiene).bind(new_stamina).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: new_hygiene,
+        appearance_level: agent.appearance_level,
+        stamina_level: new_stamina,
+        message: "You brush your teeth. Minty fresh!".to_string(),
+    })))
+}
+
+pub async fn action_get_ready(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if !is_home_location(&agent.current_location_id) {
+        return Err(AppError::BadRequest("you can only get ready at home".to_string()));
+    }
+
+    if agent.stamina_level < 25 {
+        return Err(AppError::BadRequest("not enough stamina for a full morning routine (need 25)".to_string()));
+    }
+
+    let new_hygiene = (agent.hygiene_level + 60).min(100);
+    let new_appearance = (agent.appearance_level + 40).min(100);
+    let new_stamina = agent.stamina_level - 25;
+
+    sqlx::query(
+        r#"UPDATE agents SET hygiene_level = $1, appearance_level = $2, stamina_level = $3, updated_at = NOW() WHERE id = $4"#,
+    )
+    .bind(new_hygiene).bind(new_appearance).bind(new_stamina).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: new_hygiene,
+        appearance_level: new_appearance,
+        stamina_level: new_stamina,
+        message: "You shower, groom, and dress. Ready for the day!".to_string(),
+    })))
+}
+
+pub async fn action_bathe(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if !is_bathing_location(&agent.current_location_id) {
+        return Err(AppError::BadRequest("you need to be at a river, lake, or garden to bathe outdoors".to_string()));
+    }
+
+    if agent.stamina_level < 10 {
+        return Err(AppError::BadRequest("not enough stamina to bathe (need 10)".to_string()));
+    }
+
+    let new_hygiene = (agent.hygiene_level + 40).min(100);
+    let new_appearance = (agent.appearance_level + 5).min(100);
+    let new_stamina = agent.stamina_level - 10;
+
+    sqlx::query(
+        r#"UPDATE agents SET hygiene_level = $1, appearance_level = $2, stamina_level = $3, updated_at = NOW() WHERE id = $4"#,
+    )
+    .bind(new_hygiene).bind(new_appearance).bind(new_stamina).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: new_hygiene,
+        appearance_level: new_appearance,
+        stamina_level: new_stamina,
+        message: "You bathe in the water. Clean, but a bit damp!".to_string(),
+    })))
+}
+
+#[derive(Debug, Serialize)]
+pub struct SwimResponse {
+    pub hygiene_level: i16,
+    pub appearance_level: i16,
+    pub stamina_level: i16,
+    pub message: String,
+}
+
+pub async fn action_swim(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<SwimResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if !is_bathing_location(&agent.current_location_id) {
+        return Err(AppError::BadRequest("you need to be at a river, lake, or garden to swim".to_string()));
+    }
+
+    if agent.stamina_level < 20 {
+        return Err(AppError::BadRequest("not enough stamina to swim (need 20)".to_string()));
+    }
+
+    let new_hygiene = (agent.hygiene_level + 30).min(100);
+    let new_appearance = (agent.appearance_level as i16 - 5).max(0);
+    let new_stamina = (agent.stamina_level - 20).max(0);
+
+    sqlx::query(
+        r#"UPDATE agents SET hygiene_level = $1, appearance_level = $2, stamina_level = $3, updated_at = NOW() WHERE id = $4"#,
+    )
+    .bind(new_hygiene).bind(new_appearance).bind(new_stamina).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(SwimResponse {
+        hygiene_level: new_hygiene,
+        appearance_level: new_appearance,
+        stamina_level: new_stamina,
+        message: "You go for a swim! Refreshing exercise, though your hair is a mess now.".to_string(),
+    })))
+}
+
+pub async fn action_groom(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if agent.stamina_level < 5 {
+        return Err(AppError::BadRequest("not enough stamina to groom (need 5)".to_string()));
+    }
+
+    let new_appearance = (agent.appearance_level + 15).min(100);
+    let new_stamina = agent.stamina_level - 5;
+
+    sqlx::query(
+        r#"UPDATE agents SET appearance_level = $1, stamina_level = $2, updated_at = NOW() WHERE id = $3"#,
+    )
+    .bind(new_appearance).bind(new_stamina).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: agent.hygiene_level,
+        appearance_level: new_appearance,
+        stamina_level: new_stamina,
+        message: "You fix your hair and straighten your clothes. Looking better!".to_string(),
+    })))
+}
+
+pub async fn action_apply_perfume(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    // Find perfume/cologne in inventory
+    let item = sqlx::query_as::<_, (String, i16, Option<String>, Option<i16>)>(
+        r#"SELECT id, quantity, consumable_type, vital_value FROM inventory_items
+        WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
+          AND (name ILIKE '%perfume%' OR name ILIKE '%cologne%')
+        LIMIT 1"#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no perfume or cologne in your inventory".to_string()))?;
+
+    let vital_boost = item.3.unwrap_or(20) as i16;
+    let new_appearance = (agent.appearance_level + vital_boost).min(100);
+
+    // Decrement item
+    if item.1 <= 1 {
+        sqlx::query(r#"DELETE FROM inventory_items WHERE id = $1"#)
+            .bind(&item.0).execute(&mut *tx).await?;
+    } else {
+        sqlx::query(r#"UPDATE inventory_items SET quantity = quantity - 1 WHERE id = $1"#)
+            .bind(&item.0).execute(&mut *tx).await?;
+    }
+
+    sqlx::query(
+        r#"UPDATE agents SET appearance_level = $1, updated_at = NOW() WHERE id = $2"#,
+    )
+    .bind(new_appearance).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: agent.hygiene_level,
+        appearance_level: new_appearance,
+        stamina_level: agent.stamina_level,
+        message: "You apply perfume. You smell wonderful!".to_string(),
+    })))
+}
+
+pub async fn action_apply_makeup(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
+    let mut tx = state.pool().begin().await?;
+    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    // Find makeup in inventory
+    let item = sqlx::query_as::<_, (String, i16, Option<String>, Option<i16>)>(
+        r#"SELECT id, quantity, consumable_type, vital_value FROM inventory_items
+        WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
+          AND name ILIKE '%makeup%'
+        LIMIT 1"#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no makeup in your inventory".to_string()))?;
+
+    let vital_boost = item.3.unwrap_or(25) as i16;
+    let new_appearance = (agent.appearance_level + vital_boost).min(100);
+
+    // Decrement item
+    if item.1 <= 1 {
+        sqlx::query(r#"DELETE FROM inventory_items WHERE id = $1"#)
+            .bind(&item.0).execute(&mut *tx).await?;
+    } else {
+        sqlx::query(r#"UPDATE inventory_items SET quantity = quantity - 1 WHERE id = $1"#)
+            .bind(&item.0).execute(&mut *tx).await?;
+    }
+
+    sqlx::query(
+        r#"UPDATE agents SET appearance_level = $1, updated_at = NOW() WHERE id = $2"#,
+    )
+    .bind(new_appearance).bind(&agent_id)
+    .execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HygieneActionResponse {
+        hygiene_level: agent.hygiene_level,
+        appearance_level: new_appearance,
+        stamina_level: agent.stamina_level,
+        message: "You apply makeup. Looking gorgeous!".to_string(),
+    })))
+}
+
 pub async fn action_set_intention(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
@@ -3372,6 +3751,61 @@ pub async fn get_tool_manifest(
     if has_open_election {
         tools.push(tool_nominate_self());
         tools.push(tool_cast_vote());
+    }
+
+    // Hygiene & appearance tools — based on location
+    let loc = &agent_row.1;
+
+    // Groom is always available
+    tools.push(tool_groom());
+
+    // Water access → wash_up
+    if has_water_access(loc) {
+        tools.push(tool_wash_up());
+    }
+
+    // Home → shower, brush_teeth, get_ready
+    if is_home_location(loc) {
+        tools.push(tool_shower());
+        tools.push(tool_brush_teeth());
+        tools.push(tool_get_ready());
+    }
+
+    // Bathing location → bathe, swim
+    if is_bathing_location(loc) {
+        tools.push(tool_bathe());
+        tools.push(tool_swim());
+    }
+
+    // Has perfume/makeup in inventory → apply tools
+    let has_perfume = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM inventory_items
+            WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
+              AND (name ILIKE '%perfume%' OR name ILIKE '%cologne%')
+        )"#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if has_perfume {
+        tools.push(tool_apply_perfume());
+    }
+
+    let has_makeup = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM inventory_items
+            WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
+              AND name ILIKE '%makeup%'
+        )"#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if has_makeup {
+        tools.push(tool_apply_makeup());
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -3955,7 +4389,7 @@ fn tool_order_delivery() -> WorldToolDefinition {
                         "properties": {
                             "name": {"type": "string", "description": "Item name"},
                             "quantity": {"type": "integer", "description": "How many"},
-                            "consumable_type": {"type": "string", "description": "food, water, or stamina"},
+                            "consumable_type": {"type": "string", "description": "food, water, stamina, sleep, hygiene, or appearance"},
                             "vital_value": {"type": "integer", "description": "How much vital boost this item gives"},
                             "cost_cents": {"type": "integer", "description": "Wholesale cost per unit in cents"}
                         },
@@ -4313,6 +4747,96 @@ fn tool_close_election() -> WorldToolDefinition {
         name: "close_election".to_string(),
         description: "Close the current election and declare a winner (most votes wins). Mayor only.".to_string(),
         endpoint: "/actions/close_election".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_wash_up() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "wash_up".to_string(),
+        description: "Quick wash — face and hands. Restores hygiene +15, appearance +5. Costs 5 stamina. Need water access (home, cafe, clinic, park).".to_string(),
+        endpoint: "/actions/wash_up".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_shower() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "shower".to_string(),
+        description: "Take a full shower at home. Restores hygiene +50, appearance +15. Costs 15 stamina.".to_string(),
+        endpoint: "/actions/shower".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_brush_teeth() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "brush_teeth".to_string(),
+        description: "Brush your teeth at home. Restores hygiene +10. Costs 2 stamina.".to_string(),
+        endpoint: "/actions/brush_teeth".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_get_ready() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "get_ready".to_string(),
+        description: "Full morning routine at home — shower, groom, dress. Restores hygiene +60, appearance +40. Costs 25 stamina.".to_string(),
+        endpoint: "/actions/get_ready".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_bathe() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "bathe".to_string(),
+        description: "Bathe outdoors in the river or garden. Restores hygiene +40, appearance +5. Costs 10 stamina.".to_string(),
+        endpoint: "/actions/bathe".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_swim() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "swim".to_string(),
+        description: "Go for a swim at the river or garden. Restores hygiene +30 but appearance -5 (wet hair). Costs 20 stamina.".to_string(),
+        endpoint: "/actions/swim".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_groom() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "groom".to_string(),
+        description: "Fix your hair and straighten your clothes. Restores appearance +15. Costs 5 stamina. Can do anywhere.".to_string(),
+        endpoint: "/actions/groom".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_apply_perfume() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "apply_perfume".to_string(),
+        description: "Apply perfume or cologne from your inventory. Boosts appearance +20. Others will notice the scent.".to_string(),
+        endpoint: "/actions/apply_perfume".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_apply_makeup() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "apply_makeup".to_string(),
+        description: "Apply makeup from your inventory. Boosts appearance +25. Looking your best!".to_string(),
+        endpoint: "/actions/apply_makeup".to_string(),
         method: "POST".to_string(),
         parameters: json!({"type": "object", "properties": {}, "required": []}),
     }

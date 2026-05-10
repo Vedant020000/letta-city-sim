@@ -31,6 +31,8 @@ use routes::actions::{
     action_mayor_post_ordinance, action_mayor_resolve_complaint, action_mayor_veto_ordinance,
     action_mayor_approve_city_job, action_call_election, action_nominate_self,
     action_cast_vote, action_close_election,
+    action_wash_up, action_shower, action_brush_teeth, action_get_ready,
+    action_bathe, action_swim, action_groom, action_apply_perfume, action_apply_makeup,
     action_get_intention, action_get_inventory, action_get_transaction_log,
     action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
     action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
@@ -155,6 +157,15 @@ async fn main() -> AppResult<()> {
         .route("/actions/nominate_self", post(action_nominate_self))
         .route("/actions/cast_vote", post(action_cast_vote))
         .route("/actions/close_election", post(action_close_election))
+        .route("/actions/wash_up", post(action_wash_up))
+        .route("/actions/shower", post(action_shower))
+        .route("/actions/brush_teeth", post(action_brush_teeth))
+        .route("/actions/get_ready", post(action_get_ready))
+        .route("/actions/bathe", post(action_bathe))
+        .route("/actions/swim", post(action_swim))
+        .route("/actions/groom", post(action_groom))
+        .route("/actions/apply_perfume", post(action_apply_perfume))
+        .route("/actions/apply_makeup", post(action_apply_makeup))
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))
