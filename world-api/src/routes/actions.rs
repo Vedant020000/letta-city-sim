@@ -1053,7 +1053,7 @@ pub async fn action_receive_delivery(
         sqlx::query(
             r#"
             INSERT INTO inventory_items (id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents)
-            VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, NULL)
+            VALUES ($1, $2, NULL, $3, $4::jsonb, $5, $6, $7, NULL)
             "#,
         )
         .bind(&item_id)
@@ -1070,17 +1070,19 @@ pub async fn action_receive_delivery(
     }
 
     // Mark delivery as received
+    let now_str = Utc::now().to_rfc3339();
     sqlx::query(
         r#"
         UPDATE world_objects
         SET state = jsonb_set(
-            state - 'delivery_pending' || '{"delivery_pending": false}',
+            state || '{"delivery_pending": false}',
             '{received_at}',
-            to_jsonb(NOW()::text)
+            $1::jsonb
         )
-        WHERE id = $1
+        WHERE id = $2
         "#,
     )
+    .bind(format!("\"{}\"", now_str))
     .bind(&payload.delivery_id)
     .execute(&mut *tx)
     .await?;
@@ -1226,7 +1228,7 @@ pub async fn action_order_delivery(
     sqlx::query(
         r#"
         INSERT INTO world_objects (id, name, location_id, state, actions)
-        VALUES ($1, 'Delivery Crate', $2, $3, ARRAY['receive'])
+        VALUES ($1, 'Delivery Crate', $2, $3::jsonb, ARRAY['receive'])
         "#,
     )
     .bind(&delivery_id)
