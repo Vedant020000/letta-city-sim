@@ -627,15 +627,17 @@ pub async fn action_buy_item(
     .await?
     .ok_or_else(|| AppError::BadRequest("insufficient balance".to_string()))?;
 
-    // Credit shopkeeper (if one exists at this location)
+    // Credit shopkeeper (if one exists at this shop — same location prefix, e.g. harvey_oak_*)
+    let location_prefix = item_location.split('_').take(2).collect::<Vec<_>>().join("_");
     let shopkeeper_id: Option<String> = sqlx::query_scalar(
         r#"
         SELECT id FROM agents
-        WHERE current_location_id = $1 AND occupation = 'Shopkeeper' AND is_active = TRUE
+        WHERE occupation = 'Shopkeeper' AND is_active = TRUE
+          AND current_location_id LIKE $1
         LIMIT 1
         "#,
     )
-    .bind(item_location)
+    .bind(format!("{}%", location_prefix))
     .fetch_optional(&mut *tx)
     .await?;
 
@@ -708,22 +710,22 @@ pub async fn action_buy_item(
         .await?;
     }
 
-    // Create economy transaction record
-    let transaction_id = format!("txn_{}", Uuid::new_v4());
-    sqlx::query(
-        r#"
-        INSERT INTO economy_transactions (id, from_agent_id, to_agent_id, amount_cents, reason, transaction_type, status, location_id)
-        VALUES ($1, $2, $3, $4, $5, 'payment', 'completed', $6)
-        "#,
-    )
-    .bind(&transaction_id)
-    .bind(&agent_id)
-    .bind(shopkeeper_id.as_deref().unwrap_or("city_treasury"))
-    .bind(total_cost)
-    .bind(format!("Purchased {} x{}", item.name, buy_quantity))
-    .bind(item_location)
-    .execute(&mut *tx)
-    .await?;
+    // Create economy transaction record (only if shopkeeper exists, since to_agent_id has FK constraint)
+    if let Some(ref sk_id) = shopkeeper_id {
+        sqlx::query(
+            r#"
+            INSERT INTO economy_transactions (from_agent_id, to_agent_id, amount_cents, reason, transaction_type, status, location_id)
+            VALUES ($1, $2, $3, $4, 'payment', 'completed', $5)
+            "#,
+        )
+        .bind(&agent_id)
+        .bind(sk_id)
+        .bind(total_cost)
+        .bind(format!("Purchased {} x{}", item.name, buy_quantity))
+        .bind(item_location)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     // Insert event
     sqlx::query(
