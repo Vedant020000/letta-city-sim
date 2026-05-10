@@ -35,6 +35,7 @@ use crate::routes::economy::{
 use crate::routes::sleep::start_sleep;
 use crate::models::intention::{CreateAgentIntentionRequest, UpdateAgentIntentionRequest, AgentIntention};
 use crate::state::AppState;
+use sqlx::Row;
 
 #[derive(Debug, Deserialize)]
 pub struct SetActivityActionRequest {
@@ -1348,6 +1349,832 @@ pub async fn action_clean_shop(
     })))
 }
 
+// ---------------------------------------------------------------------------
+// Job system tools
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct JobOpening {
+    pub job_id: String,
+    pub job_name: String,
+    pub summary: String,
+    pub employer_id: Option<String>,
+    pub employer_name: Option<String>,
+    pub wage_cents: Option<i64>,
+    pub is_city_job: bool,
+    pub active_employees: i64,
+}
+
+pub async fn action_list_job_openings(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<Vec<JobOpening>>>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT j.id, j.name, j.summary, j.employer_id,
+               ea.name AS employer_name,
+               j.wage_cents, j.is_city_job,
+               COALESCE(emp.cnt, 0) AS active_employees
+        FROM jobs j
+        LEFT JOIN agents ea ON ea.id = j.employer_id
+        LEFT JOIN LATERAL (
+            SELECT COUNT(*)::bigint AS cnt FROM agent_jobs aj WHERE aj.job_id = j.id AND aj.status = 'active'
+        ) emp ON TRUE
+        WHERE j.kind = 'town' AND (j.employer_id IS NOT NULL OR j.is_city_job = TRUE)
+        ORDER BY j.name
+        "#,
+    )
+    .fetch_all(state.pool())
+    .await?;
+
+    let mut openings = Vec::new();
+    for row in rows {
+        let job_id: String = row.get("id");
+        let job_name: String = row.get("name");
+        let summary: String = row.get("summary");
+        let employer_id: Option<String> = row.get("employer_id");
+        let employer_name: Option<String> = row.get("employer_name");
+        let wage_cents: Option<i64> = row.get("wage_cents");
+        let is_city_job: bool = row.get("is_city_job");
+        let active_employees: i64 = row.get("active_employees");
+
+        openings.push(JobOpening {
+            job_id,
+            job_name,
+            summary,
+            employer_id,
+            employer_name,
+            wage_cents,
+            is_city_job,
+            active_employees,
+        });
+    }
+
+    Ok(Json(ApiResponse::from(openings)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ApplyForJobRequest {
+    pub job_id: String,
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApplyForJobResponse {
+    pub job_id: String,
+    pub job_name: String,
+    pub status: String,
+    pub message: String,
+}
+
+pub async fn action_apply_for_job(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<ApplyForJobRequest>,
+) -> AppResult<Json<ApiResponse<ApplyForJobResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Fetch the job
+    let job = sqlx::query_as::<_, (String, String, Option<String>, bool, Option<i64>)>(
+        r#"SELECT id, name, employer_id, is_city_job, wage_cents FROM jobs WHERE id = $1 AND kind = 'town'"#,
+    )
+    .bind(&payload.job_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("job not found".to_string()))?;
+
+    let (job_id, job_name, employer_id, is_city_job, _wage_cents) = job;
+
+    // Check agent doesn't already have this job active
+    let already = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM agent_jobs WHERE agent_id = $1 AND job_id = $2 AND status IN ('active', 'pending'))"#,
+    )
+    .bind(&agent_id)
+    .bind(&payload.job_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if already {
+        return Err(AppError::BadRequest("you already have this job".to_string()));
+    }
+
+    let status = if is_city_job {
+        "active" // city jobs auto-approve
+    } else {
+        "pending"
+    };
+
+    // Create the assignment
+    sqlx::query(
+        r#"
+        INSERT INTO agent_jobs (agent_id, job_id, is_primary, notes, status)
+        VALUES ($1, $2, FALSE, $3, $4)
+        ON CONFLICT (agent_id, job_id) DO UPDATE SET status = $4, notes = $3, updated_at = NOW()
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(&payload.job_id)
+    .bind(&payload.notes)
+    .bind(status)
+    .execute(&mut *tx)
+    .await?;
+
+    let message = if is_city_job {
+        "You have been hired for a city position. Welcome aboard!".to_string()
+    } else {
+        "Application submitted. The employer will review it.".to_string()
+    };
+
+    // Wake employer about application (if not city job)
+    if let Some(ref eid) = employer_id {
+        if !is_city_job {
+            let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+                &mut tx,
+                eid,
+                "job_application",
+                serde_json::json!({"job_id": &payload.job_id, "applicant_id": &agent_id}),
+                format!("{} applied for a job at your business.", agent_id),
+                serde_json::json!({"event_type": "job.application", "applicant_id": &agent_id, "job_id": &payload.job_id}),
+                serde_json::json!([]),
+                true,
+            ).await;
+        }
+    }
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.applied_for_job")
+    .bind(&agent_id)
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .bind(format!("Agent {} applied for job {}", agent_id, job_name))
+    .bind(serde_json::json!({"job_id": &payload.job_id, "status": status}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(ApplyForJobResponse {
+        job_id,
+        job_name,
+        status: status.to_string(),
+        message,
+    })))
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayrollEntry {
+    pub employee_id: String,
+    pub employee_name: String,
+    pub job_id: String,
+    pub job_name: String,
+    pub wage_cents: Option<i64>,
+    pub last_paid_at: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CheckPayrollResponse {
+    pub employees: Vec<PayrollEntry>,
+    pub employer_balance_cents: i64,
+    pub total_payroll_cents: i64,
+}
+
+pub async fn action_check_payroll(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<CheckPayrollResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Get employer balance
+    let balance = sqlx::query_scalar::<_, i64>(
+        r#"SELECT balance_cents FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Get active employees where this agent is the employer
+    let rows = sqlx::query_as::<_, (String, String, String, String, Option<i64>, Option<chrono::DateTime<chrono::Utc>>, String)>(
+        r#"
+        SELECT a.id, a.name, j.id, j.name, j.wage_cents, aj.last_paid_at, aj.status
+        FROM agent_jobs aj
+        JOIN jobs j ON j.id = aj.job_id
+        JOIN agents a ON a.id = aj.agent_id
+        WHERE j.employer_id = $1 AND aj.status = 'active'
+        ORDER BY a.name
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let employees: Vec<PayrollEntry> = rows.into_iter().map(|r| PayrollEntry {
+        employee_id: r.0,
+        employee_name: r.1,
+        job_id: r.2,
+        job_name: r.3,
+        wage_cents: r.4,
+        last_paid_at: r.5.map(|dt| dt.to_rfc3339()),
+        status: r.6,
+    }).collect();
+
+    let total_payroll: i64 = employees.iter()
+        .filter_map(|e| e.wage_cents)
+        .sum();
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(CheckPayrollResponse {
+        employees,
+        employer_balance_cents: balance,
+        total_payroll_cents: total_payroll,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PayEmployeeRequest {
+    pub employee_id: String,
+    pub amount_cents: i64,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PayEmployeeResponse {
+    pub employee_id: String,
+    pub amount_cents: i64,
+    pub employer_new_balance_cents: i64,
+    pub employee_new_balance_cents: i64,
+}
+
+pub async fn action_pay_employee(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<PayEmployeeRequest>,
+) -> AppResult<Json<ApiResponse<PayEmployeeResponse>>> {
+    if payload.amount_cents <= 0 {
+        return Err(AppError::BadRequest("amount must be positive".to_string()));
+    }
+
+    let mut tx = state.pool().begin().await?;
+
+    // Verify employer-employee relationship
+    let is_employer = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj
+            JOIN jobs j ON j.id = aj.job_id
+            WHERE j.employer_id = $1 AND aj.agent_id = $2 AND aj.status = 'active'
+        )
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(&payload.employee_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !is_employer {
+        return Err(AppError::BadRequest("you are not this agent's employer".to_string()));
+    }
+
+    // Check employer balance
+    let employer_balance = sqlx::query_scalar::<_, i64>(
+        r#"SELECT balance_cents FROM agents WHERE id = $1 FOR UPDATE"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if employer_balance < payload.amount_cents {
+        return Err(AppError::BadRequest(
+            format!("insufficient balance (have ${:.2}, need ${:.2})", employer_balance as f64 / 100.0, payload.amount_cents as f64 / 100.0)
+        ));
+    }
+
+    // Debit employer
+    sqlx::query(
+        r#"
+        UPDATE agents SET balance_cents = balance_cents - $1,
+            last_expense_cents = $1,
+            last_expense_reason = 'Salary payment',
+            last_expense_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $2 AND balance_cents >= $1
+        RETURNING balance_cents
+        "#,
+    )
+    .bind(payload.amount_cents)
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Credit employee
+    let employee_new_balance = sqlx::query_scalar::<_, i64>(
+        r#"
+        UPDATE agents SET balance_cents = balance_cents + $1,
+            last_income_cents = $1,
+            last_income_reason = 'Salary',
+            last_income_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $2
+        RETURNING balance_cents
+        "#,
+    )
+    .bind(payload.amount_cents)
+    .bind(&payload.employee_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Update last_paid_at
+    sqlx::query(
+        r#"
+        UPDATE agent_jobs SET last_paid_at = NOW(), updated_at = NOW()
+        WHERE agent_id = $1 AND job_id IN (SELECT id FROM jobs WHERE employer_id = $2)
+        "#,
+    )
+    .bind(&payload.employee_id)
+    .bind(&agent_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Create economy transaction
+    sqlx::query(
+        r#"
+        INSERT INTO economy_transactions (from_agent_id, to_agent_id, amount_cents, reason, transaction_type, status, location_id)
+        VALUES ($1, $2, $3, $4, 'salary', 'completed', $5)
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(&payload.employee_id)
+    .bind(payload.amount_cents)
+    .bind(payload.reason.as_deref().unwrap_or("Salary payment"))
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .execute(&mut *tx)
+    .await?;
+
+    // Get employer's new balance
+    let employer_new_balance = sqlx::query_scalar::<_, i64>(
+        r#"SELECT balance_cents FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Wake employee about payment
+    let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+        &mut tx,
+        &payload.employee_id,
+        "salary_received",
+        serde_json::json!({"amount_cents": payload.amount_cents, "employer_id": &agent_id}),
+        format!("You received ${:.2} from your employer.", payload.amount_cents as f64 / 100.0),
+        serde_json::json!({"event_type": "salary.received", "amount_cents": payload.amount_cents, "employer_id": &agent_id}),
+        serde_json::json!([]),
+        true,
+    ).await;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("employer.paid_employee")
+    .bind(&agent_id)
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .bind(format!("{} paid {} ${:.2}", agent_id, payload.employee_id, payload.amount_cents as f64 / 100.0))
+    .bind(serde_json::json!({"employee_id": &payload.employee_id, "amount_cents": payload.amount_cents}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(PayEmployeeResponse {
+        employee_id: payload.employee_id,
+        amount_cents: payload.amount_cents,
+        employer_new_balance_cents: employer_new_balance,
+        employee_new_balance_cents: employee_new_balance,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResignJobRequest {
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResignJobResponse {
+    pub job_id: String,
+    pub job_name: String,
+    pub status: String,
+}
+
+pub async fn action_resign_job(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<ResignJobRequest>,
+) -> AppResult<Json<ApiResponse<ResignJobResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Find the agent's primary active job
+    let job = sqlx::query_as::<_, (String, String, Option<String>)>(
+        r#"
+        SELECT j.id, j.name, j.employer_id
+        FROM agent_jobs aj
+        JOIN jobs j ON j.id = aj.job_id
+        WHERE aj.agent_id = $1 AND aj.is_primary = TRUE AND aj.status = 'active'
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no active primary job to resign from".to_string()))?;
+
+    let (job_id, job_name, employer_id) = job;
+
+    // Mark as resigned
+    sqlx::query(
+        r#"
+        UPDATE agent_jobs SET status = 'resigned', resigned_at = NOW(), updated_at = NOW()
+        WHERE agent_id = $1 AND job_id = $2 AND status = 'active'
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(&job_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Wake employer about resignation
+    if let Some(ref eid) = employer_id {
+        let reason = payload.reason.as_deref().unwrap_or("No reason given");
+        let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+            &mut tx,
+            eid,
+            "employee_resigned",
+            serde_json::json!({"employee_id": &agent_id, "job_id": &job_id}),
+            format!("{} resigned from {} — {}", agent_id, job_name, reason),
+            serde_json::json!({"event_type": "job.resignation", "employee_id": &agent_id, "job_id": &job_id}),
+            serde_json::json!([]),
+            true,
+        ).await;
+    }
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.resigned_job")
+    .bind(&agent_id)
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .bind(format!("Agent {} resigned from {}", agent_id, job_name))
+    .bind(serde_json::json!({"job_id": &job_id, "reason": payload.reason}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(ResignJobResponse {
+        job_id,
+        job_name,
+        status: "resigned".to_string(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HireApplicantRequest {
+    pub applicant_id: String,
+    pub job_id: String,
+    pub wage_cents: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HireApplicantResponse {
+    pub applicant_id: String,
+    pub job_name: String,
+    pub status: String,
+}
+
+pub async fn action_hire_applicant(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<HireApplicantRequest>,
+) -> AppResult<Json<ApiResponse<HireApplicantResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Verify this agent is the employer for the job
+    let job = sqlx::query_as::<_, (String, String)>(
+        r#"SELECT id, name FROM jobs WHERE id = $1 AND employer_id = $2"#,
+    )
+    .bind(&payload.job_id)
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("you are not the employer for this job".to_string()))?;
+
+    let (job_id, job_name) = job;
+
+    // Verify pending application exists
+    let pending = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM agent_jobs WHERE agent_id = $1 AND job_id = $2 AND status = 'pending')"#,
+    )
+    .bind(&payload.applicant_id)
+    .bind(&payload.job_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !pending {
+        return Err(AppError::BadRequest("no pending application found for this agent and job".to_string()));
+    }
+
+    // Approve the application
+    sqlx::query(
+        r#"
+        UPDATE agent_jobs SET status = 'active', hired_at = NOW(), updated_at = NOW()
+        WHERE agent_id = $1 AND job_id = $2 AND status = 'pending'
+        "#,
+    )
+    .bind(&payload.applicant_id)
+    .bind(&payload.job_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Optionally update wage
+    if let Some(wage) = payload.wage_cents {
+        sqlx::query(
+            r#"UPDATE jobs SET wage_cents = $1, updated_at = NOW() WHERE id = $2"#,
+        )
+        .bind(wage)
+        .bind(&payload.job_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    // Wake applicant about hiring
+    let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+        &mut tx,
+        &payload.applicant_id,
+        "job_hired",
+        serde_json::json!({"job_id": &job_id, "employer_id": &agent_id}),
+        format!("You've been hired as {}!", job_name),
+        serde_json::json!({"event_type": "job.hired", "job_id": &job_id, "employer_id": &agent_id}),
+        serde_json::json!([]),
+        true,
+    ).await;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("employer.hired_applicant")
+    .bind(&agent_id)
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .bind(format!("{} hired {} as {}", agent_id, payload.applicant_id, job_name))
+    .bind(serde_json::json!({"applicant_id": &payload.applicant_id, "job_id": &job_id}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(HireApplicantResponse {
+        applicant_id: payload.applicant_id,
+        job_name,
+        status: "active".to_string(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FireEmployeeRequest {
+    pub employee_id: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FireEmployeeResponse {
+    pub employee_id: String,
+    pub job_name: String,
+    pub status: String,
+}
+
+pub async fn action_fire_employee(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<FireEmployeeRequest>,
+) -> AppResult<Json<ApiResponse<FireEmployeeResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Find the employee's active job where this agent is the employer
+    let job = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT j.id, j.name
+        FROM agent_jobs aj
+        JOIN jobs j ON j.id = aj.job_id
+        WHERE aj.agent_id = $1 AND j.employer_id = $2 AND aj.status = 'active'
+        "#,
+    )
+    .bind(&payload.employee_id)
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("you don't employ this agent".to_string()))?;
+
+    let (job_id, job_name) = job;
+
+    // Mark as fired
+    sqlx::query(
+        r#"
+        UPDATE agent_jobs SET status = 'fired', resigned_at = NOW(), updated_at = NOW()
+        WHERE agent_id = $1 AND job_id = $2 AND status = 'active'
+        "#,
+    )
+    .bind(&payload.employee_id)
+    .bind(&job_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Wake employee about termination
+    let reason = payload.reason.as_deref().unwrap_or("No reason given");
+    let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+        &mut tx,
+        &payload.employee_id,
+        "job_fired",
+        serde_json::json!({"job_id": &job_id, "employer_id": &agent_id, "reason": &payload.reason}),
+        format!("You've been fired from {} — {}", job_name, reason),
+        serde_json::json!({"event_type": "job.fired", "job_id": &job_id, "employer_id": &agent_id}),
+        serde_json::json!([]),
+        true,
+    ).await;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("employer.fired_employee")
+    .bind(&agent_id)
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .bind(format!("{} fired {} from {}", agent_id, payload.employee_id, job_name))
+    .bind(serde_json::json!({"employee_id": &payload.employee_id, "job_id": &job_id, "reason": payload.reason}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(FireEmployeeResponse {
+        employee_id: payload.employee_id,
+        job_name,
+        status: "fired".to_string(),
+    })))
+}
+
+#[derive(Debug, Serialize)]
+pub struct CollectCityWageResponse {
+    pub job_id: String,
+    pub job_name: String,
+    pub amount_cents: i64,
+    pub new_balance_cents: i64,
+}
+
+pub async fn action_collect_city_wage(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<CollectCityWageResponse>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Find agent's active city job
+    let job = sqlx::query_as::<_, (String, String, i64, i32, Option<chrono::DateTime<chrono::Utc>>)>(
+        r#"
+        SELECT j.id, j.name, j.wage_cents, j.pay_period_minutes, aj.last_paid_at
+        FROM agent_jobs aj
+        JOIN jobs j ON j.id = aj.job_id
+        WHERE aj.agent_id = $1 AND j.is_city_job = TRUE AND aj.status = 'active'
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no active city job found".to_string()))?;
+
+    let (job_id, job_name, wage_cents, pay_period_minutes, last_paid_at) = job;
+
+    // Check if enough time has passed
+    if let Some(last) = last_paid_at {
+        let elapsed = Utc::now() - last;
+        let min_duration = chrono::Duration::minutes(pay_period_minutes as i64);
+        if elapsed < min_duration {
+            let remaining = min_duration - elapsed;
+            return Err(AppError::BadRequest(
+                format!("not yet time to collect wage ({} minutes remaining)", remaining.num_minutes())
+            ));
+        }
+    }
+
+    // Debit city treasury
+    let treasury_balance = sqlx::query_scalar::<_, i64>(
+        r#"SELECT balance_cents FROM agents WHERE id = 'city_treasury' FOR UPDATE"#,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if treasury_balance < wage_cents {
+        return Err(AppError::BadRequest("city treasury is insolvent".to_string()));
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE agents SET balance_cents = balance_cents - $1, updated_at = NOW()
+        WHERE id = 'city_treasury'
+        "#,
+    )
+    .bind(wage_cents)
+    .execute(&mut *tx)
+    .await?;
+
+    // Credit agent
+    let new_balance = sqlx::query_scalar::<_, i64>(
+        r#"
+        UPDATE agents SET balance_cents = balance_cents + $1,
+            last_income_cents = $1,
+            last_income_reason = 'City wage',
+            last_income_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $2
+        RETURNING balance_cents
+        "#,
+    )
+    .bind(wage_cents)
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Update last_paid_at
+    sqlx::query(
+        r#"
+        UPDATE agent_jobs SET last_paid_at = NOW(), updated_at = NOW()
+        WHERE agent_id = $1 AND job_id = $2
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(&job_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Create economy transaction
+    sqlx::query(
+        r#"
+        INSERT INTO economy_transactions (from_agent_id, to_agent_id, amount_cents, reason, transaction_type, status, location_id)
+        VALUES ('city_treasury', $1, $2, $3, 'salary', 'completed', $4)
+        "#,
+    )
+    .bind(&agent_id)
+    .bind(wage_cents)
+    .bind(format!("City wage: {}", job_name))
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .execute(&mut *tx)
+    .await?;
+
+    // Insert event
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.collected_city_wage")
+    .bind(&agent_id)
+    .bind(sqlx::query_scalar::<_, String>("SELECT current_location_id FROM agents WHERE id = $1").bind(&agent_id).fetch_one(&mut *tx).await?)
+    .bind(format!("Agent {} collected city wage for {}", agent_id, job_name))
+    .bind(serde_json::json!({"job_id": &job_id, "amount_cents": wage_cents}).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(CollectCityWageResponse {
+        job_id,
+        job_name,
+        amount_cents: wage_cents,
+        new_balance_cents: new_balance,
+    })))
+}
+
 pub async fn action_set_intention(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
@@ -1654,6 +2481,78 @@ pub async fn get_tool_manifest(
         } else {
             tools.push(tool_order_delivery());
         }
+    }
+
+    // Job system tools — available based on employment status
+    // Always available: list_job_openings
+    tools.push(tool_list_job_openings());
+
+    // Has active primary job → can resign
+    let has_active_job = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM agent_jobs WHERE agent_id = $1 AND is_primary = TRUE AND status = 'active')"#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if has_active_job {
+        tools.push(tool_resign_job());
+    }
+
+    // Is an employer (has active employees) → payroll + pay + fire
+    let is_employer = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj
+            JOIN jobs j ON j.id = aj.job_id
+            WHERE j.employer_id = $1 AND aj.status = 'active'
+        )
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if is_employer {
+        tools.push(tool_check_payroll());
+        tools.push(tool_pay_employee());
+        tools.push(tool_fire_employee());
+    }
+
+    // Has pending job applications → can hire
+    let has_pending_applications = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj
+            JOIN jobs j ON j.id = aj.job_id
+            WHERE j.employer_id = $1 AND aj.status = 'pending'
+        )
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if has_pending_applications {
+        tools.push(tool_hire_applicant());
+    }
+
+    // Has active city job → can collect wage
+    let has_city_job = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj
+            JOIN jobs j ON j.id = aj.job_id
+            WHERE aj.agent_id = $1 AND j.is_city_job = TRUE AND aj.status = 'active'
+        )
+        "#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if has_city_job {
+        tools.push(tool_collect_city_wage());
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -2261,6 +3160,122 @@ fn tool_clean_shop() -> WorldToolDefinition {
             "properties": {},
             "required": []
         }),
+    }
+}
+
+fn tool_list_job_openings() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "list_job_openings".to_string(),
+        description: "See available jobs with wages, employers, and how many employees each has.".to_string(),
+        endpoint: "/actions/list_job_openings".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_apply_for_job() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "apply_for_job".to_string(),
+        description: "Apply for a job. City jobs are approved immediately; private jobs require employer approval.".to_string(),
+        endpoint: "/actions/apply_for_job".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string", "description": "The job to apply for."},
+                "notes": {"type": "string", "description": "Optional message to the employer."}
+            },
+            "required": ["job_id"]
+        }),
+    }
+}
+
+fn tool_check_payroll() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_payroll".to_string(),
+        description: "See your active employees, their wages, when they were last paid, and your total payroll obligation. Employer only.".to_string(),
+        endpoint: "/actions/check_payroll".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_pay_employee() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "pay_employee".to_string(),
+        description: "Pay an employee from your balance. The amount is deducted from you and credited to them. Employer only.".to_string(),
+        endpoint: "/actions/pay_employee".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "employee_id": {"type": "string", "description": "The employee to pay."},
+                "amount_cents": {"type": "integer", "description": "How much to pay in cents."},
+                "reason": {"type": "string", "description": "Optional reason for the payment."}
+            },
+            "required": ["employee_id", "amount_cents"]
+        }),
+    }
+}
+
+fn tool_resign_job() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "resign_job".to_string(),
+        description: "Resign from your current primary job. Your employer will be notified.".to_string(),
+        endpoint: "/actions/resign_job".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "Why you're resigning."}
+            },
+            "required": []
+        }),
+    }
+}
+
+fn tool_hire_applicant() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "hire_applicant".to_string(),
+        description: "Approve a pending job application. Employer only.".to_string(),
+        endpoint: "/actions/hire_applicant".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "applicant_id": {"type": "string", "description": "Who to hire."},
+                "job_id": {"type": "string", "description": "Which job they applied for."},
+                "wage_cents": {"type": "integer", "description": "Optional wage override in cents."}
+            },
+            "required": ["applicant_id", "job_id"]
+        }),
+    }
+}
+
+fn tool_fire_employee() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "fire_employee".to_string(),
+        description: "Fire an employee from their job. They will be notified. Employer only.".to_string(),
+        endpoint: "/actions/fire_employee".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "employee_id": {"type": "string", "description": "Who to fire."},
+                "reason": {"type": "string", "description": "Why they're being fired."}
+            },
+            "required": ["employee_id"]
+        }),
+    }
+}
+
+fn tool_collect_city_wage() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "collect_city_wage".to_string(),
+        description: "Collect your salary from the city treasury. Only available if you have a city job and enough time has passed since last pay.".to_string(),
+        endpoint: "/actions/collect_city_wage".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
     }
 }
 

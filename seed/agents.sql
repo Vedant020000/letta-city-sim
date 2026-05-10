@@ -110,6 +110,20 @@ VALUES
     'placeholder_abigail_chen',
     NULL,
     'oak_classroom_a'
+  ),
+  (
+    'city_treasury',
+    'City Treasury',
+    'City Treasury',
+    'Municipal fund that pays civic employees and maintains public services.',
+    'notice_board',
+    'idle',
+    NULL,
+    TRUE,
+    TRUE,
+    NULL,
+    NULL,
+    'notice_board'
   )
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,

@@ -24,6 +24,8 @@ use routes::actions::{
     action_accept_invitation, action_accept_join_request, action_board_post, action_check_balance,
     action_cook_food, action_buy_item, action_check_vitals, action_complete_intention, action_drop_item,
     action_check_shelf_stock, action_restock_shelf, action_receive_delivery, action_order_delivery, action_clean_shop,
+    action_list_job_openings, action_apply_for_job, action_check_payroll, action_pay_employee,
+    action_resign_job, action_hire_applicant, action_fire_employee, action_collect_city_wage,
     action_get_intention, action_get_inventory, action_get_transaction_log,
     action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
     action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
@@ -126,6 +128,14 @@ async fn main() -> AppResult<()> {
         .route("/actions/receive_delivery", post(action_receive_delivery))
         .route("/actions/order_delivery", post(action_order_delivery))
         .route("/actions/clean_shop", post(action_clean_shop))
+        .route("/actions/list_job_openings", post(action_list_job_openings))
+        .route("/actions/apply_for_job", post(action_apply_for_job))
+        .route("/actions/check_payroll", post(action_check_payroll))
+        .route("/actions/pay_employee", post(action_pay_employee))
+        .route("/actions/resign_job", post(action_resign_job))
+        .route("/actions/hire_applicant", post(action_hire_applicant))
+        .route("/actions/fire_employee", post(action_fire_employee))
+        .route("/actions/collect_city_wage", post(action_collect_city_wage))
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))

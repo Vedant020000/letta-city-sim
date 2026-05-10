@@ -1,74 +1,84 @@
-INSERT INTO jobs (id, name, kind, summary, metadata)
+INSERT INTO jobs (id, name, kind, summary, metadata, employer_id, wage_cents, pay_period_minutes, is_city_job)
 VALUES
   (
     'music_student',
     'Music Student',
     'town',
     'Studies, practices, and performs music around town.',
-    '{"typical_tasks": ["practice", "study", "perform"], "interfaces_with": ["professor", "writer"], "guardrails": ["Keep activities grounded in current locations and tools."], "contributor_notes": "Good for school, rehearsal, and late-night routine content."}'::jsonb
+    '{\"typical_tasks\": [\"practice\", \"study\", \"perform\"], \"interfaces_with\": [\"professor\", \"writer\"], \"guardrails\": [\"Keep activities grounded in current locations and tools.\"], \"contributor_notes\": \"Good for school, rehearsal, and late-night routine content.\"}'::jsonb,
+    NULL, NULL, 60, FALSE
   ),
   (
     'cafe_owner',
     'Cafe Owner',
     'town',
     'Runs a cafe, serves customers, and anchors a social venue.',
-    '{"typical_tasks": ["serve drinks", "manage stock", "chat with patrons"], "interfaces_with": ["shopkeeper", "writer"], "guardrails": ["Avoid inventing full restaurant simulation rules in seed-only contributions."], "contributor_notes": "Good anchor for Hobbs Cafe content packs."}'::jsonb
+    '{\"typical_tasks\": [\"serve drinks\", \"manage stock\", \"chat with patrons\"], \"interfaces_with\": [\"shopkeeper\", \"writer\"], \"guardrails\": [\"Avoid inventing full restaurant simulation rules in seed-only contributions.\"], \"contributor_notes\": \"Good anchor for Hobbs Cafe content packs.\"}'::jsonb,
+    NULL, NULL, 60, FALSE
   ),
   (
     'professor',
     'Professor',
     'town',
     'Teaches classes, mentors students, and works from campus spaces.',
-    '{"typical_tasks": ["teach", "grade", "research"], "interfaces_with": ["student", "researcher"], "guardrails": ["Keep classroom behavior compatible with the current college footprint."], "contributor_notes": "Useful for Oak Hill schedules, prompts, and future lesson/demo content."}'::jsonb
+    '{\"typical_tasks\": [\"teach\", \"grade\", \"research\"], \"interfaces_with\": [\"student\", \"researcher\"], \"guardrails\": [\"Keep classroom behavior compatible with the current college footprint.\"], \"contributor_notes\": \"Useful for Oak Hill schedules, prompts, and future lesson/demo content.\"}'::jsonb,
+    NULL, NULL, 60, FALSE
   ),
   (
     'artist',
     'Artist',
     'town',
     'Creates art in public or private spaces and adds cultural texture to town life.',
-    '{"typical_tasks": ["sketch", "paint", "observe town"], "interfaces_with": ["writer", "archivist"], "guardrails": ["Prefer location-grounded activities over abstract economy systems."], "contributor_notes": "Good source of park, gallery, and event ideas."}'::jsonb
+    '{\"typical_tasks\": [\"sketch\", \"paint\", \"observe town\"], \"interfaces_with\": [\"writer\", \"archivist\"], \"guardrails\": [\"Prefer location-grounded activities over abstract economy systems.\"], \"contributor_notes\": \"Good source of park, gallery, and event ideas.\"}'::jsonb,
+    NULL, NULL, 60, FALSE
   ),
   (
     'shop_assistant',
     'Shop Assistant',
     'town',
     'Helps run a local store, organizes goods, and handles everyday customer tasks.',
-    '{"typical_tasks": ["stock shelves", "help customers", "count inventory"], "interfaces_with": ["shopkeeper", "dispatcher"], "guardrails": ["Stay within current inventory/location interactions unless maintainers expand commerce systems."], "contributor_notes": "Good for Harvey Oak Supply and future retail packs."}'::jsonb
+    '{\"typical_tasks\": [\"stock shelves\", \"help customers\", \"count inventory\"], \"interfaces_with\": [\"shopkeeper\", \"dispatcher\"], \"guardrails\": [\"Stay within current inventory/location interactions unless maintainers expand commerce systems.\"], \"contributor_notes\": \"Good for Harvey Oak Supply and future retail packs.\"}'::jsonb,
+    'rosie_kim', 500, 60, FALSE
   ),
   (
     'student',
     'Student',
     'town',
     'Studies, socializes, and moves between campus and town venues.',
-    '{"typical_tasks": ["attend class", "study", "meet friends"], "interfaces_with": ["professor", "music_student"], "guardrails": ["Avoid turning this into a full academic scheduling system yet."], "contributor_notes": "Useful for campus and cafe content."}'::jsonb
+    '{\"typical_tasks\": [\"attend class\", \"study\", \"meet friends\"], \"interfaces_with\": [\"professor\", \"music_student\"], \"guardrails\": [\"Avoid turning this into a full academic scheduling system yet.\"], \"contributor_notes\": \"Useful for campus and cafe content.\"}'::jsonb,
+    NULL, NULL, 60, FALSE
   ),
   (
     'shopkeeper',
     'Shopkeeper',
     'town',
     'Owns or runs a store and defines the rhythm of a commercial venue.',
-    '{"typical_tasks": ["open shop", "sell goods", "manage venue"], "interfaces_with": ["shop_assistant", "auditor"], "guardrails": ["Treat pricing and payroll as future systems unless maintainers open them up."], "contributor_notes": "A canonical generic town role for future stores."}'::jsonb
+    '{\"typical_tasks\": [\"open shop\", \"sell goods\", \"manage venue\"], \"interfaces_with\": [\"shop_assistant\", \"auditor\"], \"guardrails\": [\"Treat pricing and payroll as future systems unless maintainers open them up.\"], \"contributor_notes\": \"A canonical generic town role for future stores.\"}'::jsonb,
+    NULL, NULL, 60, FALSE
   ),
   (
     'librarian',
     'Librarian',
     'town',
     'Maintains a library space, helps people find materials, and keeps quiet civic knowledge organized.',
-    '{"typical_tasks": ["shelve materials", "help patrons", "maintain quiet spaces"], "interfaces_with": ["archivist", "researcher"], "guardrails": ["Keep the role grounded in current library locations and basic interactions."], "contributor_notes": "Pairs well with the new Smallville library locations."}'::jsonb
+    '{\"typical_tasks\": [\"shelve materials\", \"help patrons\", \"maintain quiet spaces\"], \"interfaces_with\": [\"archivist\", \"researcher\"], \"guardrails\": [\"Keep the role grounded in current library locations and basic interactions.\"], \"contributor_notes\": \"Pairs well with the new Smallville library locations.\"}'::jsonb,
+    'city_treasury', 350, 60, TRUE
   ),
   (
     'groundskeeper',
     'Groundskeeper',
     'town',
     'Looks after parks, gardens, and shared outdoor spaces.',
-    '{"typical_tasks": ["water plants", "maintain paths", "tidy public spaces"], "interfaces_with": ["mediator", "writer"], "guardrails": ["Treat this as content/behavior scaffolding, not a full maintenance simulation."], "contributor_notes": "Useful for park and community-garden expansion work."}'::jsonb
+    '{\"typical_tasks\": [\"water plants\", \"maintain paths\", \"tidy public spaces\"], \"interfaces_with\": [\"mediator\", \"writer\"], \"guardrails\": [\"Treat this as content/behavior scaffolding, not a full maintenance simulation.\"], \"contributor_notes\": \"Useful for park and community-garden expansion work.\"}'::jsonb,
+    'city_treasury', 300, 60, TRUE
   ),
   (
     'clinic_worker',
     'Clinic Worker',
     'town',
     'Supports a neighborhood clinic through intake, care, and public-health routines.',
-    '{"typical_tasks": ["check in visitors", "share care guidance", "maintain clinic flow"], "interfaces_with": ["therapist", "ombudsperson"], "guardrails": ["Avoid implementing real medical workflows or diagnoses."], "contributor_notes": "Useful for Riverside Clinic content without overcommitting the simulation."}'::jsonb
+    '{\"typical_tasks\": [\"check in visitors\", \"share care guidance\", \"maintain clinic flow\"], \"interfaces_with\": [\"therapist\", \"ombudsperson\"], \"guardrails\": [\"Avoid implementing real medical workflows or diagnoses.\"], \"contributor_notes\": \"Useful for Riverside Clinic content without overcommitting the simulation.\"}'::jsonb,
+    'city_treasury', 400, 60, TRUE
   ),
   (
     'dispatcher',
@@ -187,4 +197,8 @@ SET name = EXCLUDED.name,
     kind = EXCLUDED.kind,
     summary = EXCLUDED.summary,
     metadata = EXCLUDED.metadata,
+    employer_id = EXCLUDED.employer_id,
+    wage_cents = EXCLUDED.wage_cents,
+    pay_period_minutes = EXCLUDED.pay_period_minutes,
+    is_city_job = EXCLUDED.is_city_job,
     updated_at = NOW();
