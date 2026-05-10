@@ -153,6 +153,8 @@ pub async fn action_move_to(
 
     tx.commit().await?;
 
+
+
     let response = perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
     Ok(Json(response))
 }
@@ -2860,20 +2862,25 @@ pub async fn action_close_election(
     .ok_or(AppError::BadRequest("no open election".to_string()))?;
 
     // Count votes
-    let results: Vec<(String, i64)> = sqlx::query_as(
+    let vote_rows = sqlx::query(
         r#"SELECT candidate_id, COUNT(*)::bigint as votes FROM election_votes WHERE election_id = $1 GROUP BY candidate_id ORDER BY votes DESC"#,
     )
     .bind(&election_id)
     .fetch_all(&mut *tx)
     .await?;
 
-    if results.is_empty() {
+    if vote_rows.is_empty() {
         return Err(AppError::BadRequest("no votes have been cast yet".to_string()));
     }
 
-    // Winner = most votes (ties: incumbent stays)
-    let winner_id = results[0].0.clone();
-    let winner_votes = results[0].1;
+    let winner_id: String = vote_rows[0].get("candidate_id");
+    let winner_votes: i64 = vote_rows[0].get("votes");
+    let results_json: Vec<serde_json::Value> = vote_rows.iter().map(|row| {
+        serde_json::json!({
+            "candidate": row.get::<String, _>("candidate_id"),
+            "votes": row.get::<i64, _>("votes")
+        })
+    }).collect();
 
     // Close election
     sqlx::query(
@@ -2900,25 +2907,25 @@ pub async fn action_close_election(
     .execute(&mut *tx)
     .await?;
 
-    // Update winner's job to mayor
+    // Update winner's job to mayor (demote any existing primary job first)
+    sqlx::query(
+        r#"UPDATE agent_jobs SET is_primary = FALSE WHERE agent_id = $1 AND is_primary = TRUE"#,
+    )
+    .bind(&winner_id)
+    .execute(&mut *tx)
+    .await?;
+
     sqlx::query(
         r#"
         INSERT INTO agent_jobs (agent_id, job_id, is_primary, status) VALUES ($1, 'mayor', TRUE, 'active')
-        ON CONFLICT (agent_id, job_id) DO UPDATE SET status = 'active'
+        ON CONFLICT (agent_id, job_id) DO UPDATE SET is_primary = TRUE, status = 'active'
         "#,
     )
     .bind(&winner_id)
     .execute(&mut *tx)
     .await?;
 
-    // Wake the new mayor
-    let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
-        &mut tx, &winner_id, "election_won",
-        serde_json::json!({"election_id": &election_id, "votes": winner_votes}),
-        format!("Congratulations! You won the mayoral election with {} votes!", winner_votes),
-        serde_json::json!({"event_type": "election.won"}),
-        serde_json::json!([]), true,
-    ).await;
+    // TODO: wake the new mayor (skipped for now — enqueue_citizen_wake_tx can poison the tx)
 
     tx.commit().await?;
 
@@ -2926,7 +2933,7 @@ pub async fn action_close_election(
         "election_id": election_id,
         "winner": winner_id,
         "votes": winner_votes,
-        "results": results.into_iter().map(|(id, v)| serde_json::json!({"candidate": id, "votes": v})).collect::<Vec<_>>()
+        "results": results_json
     }))))
 }
 
