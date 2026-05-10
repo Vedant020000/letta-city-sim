@@ -12,6 +12,8 @@ These guides are the practical starting point for community contributors.
 - `adding-locations.md` — add locations and adjacency edges safely
 - `adding-jobs.md` — add town jobs, meta roles, and seeded assignments safely
 - `adding-items-and-consumables.md` — add content packs for items and consumables
+- `economy-system.md` — jobs, wages, payroll, shopkeeper tools, and the economic loop
+- `civic-system.md` — mayor, elections, civic board, townhall, and city employment caps
 - `agent-auth.md` — local admin auth vs hosted bearer-token auth for agents
 - `deploying-to-railway.md` — create a public Railway deployment that auto-redeploys from GitHub `main`
 - `public-railway-instance.md` — how to use the shared hosted Railway world safely

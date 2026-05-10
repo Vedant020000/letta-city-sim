@@ -46,7 +46,8 @@ Do **not** open broad PRs that redesign these without explicit maintainer direct
 
 - database/schema direction beyond additive job work
 - automatic job scheduling / shift systems
-- wages, payroll, or economy policy
+- wages, payroll, or economy policy (see `economy-system.md`)
+- election or mayor system changes (see `civic-system.md`)
 - hidden orchestration layers that change wake/interrupt behavior
 - full role-execution engines for agents
 
@@ -76,14 +77,19 @@ Add a row to `seed/jobs.sql`:
   'Florist',
   'town',
   'Maintains flower stock and helps townspeople choose bouquets and gifts.',
-  '{"typical_tasks": ["arrange flowers", "help customers"], "interfaces_with": ["groundskeeper", "writer"], "guardrails": ["Keep the role grounded in existing venues unless new locations are added."], "contributor_notes": "Good candidate for a future market or garden-adjacent venue."}'::jsonb
+  '{"typical_tasks": ["arrange flowers", "help customers"], "interfaces_with": ["groundskeeper", "writer"], "guardrails": ["Keep the role grounded in existing venues unless new locations are added."], "contributor_notes": "Good candidate for a future market or garden-adjacent venue."}'::jsonb,
+  NULL,   -- employer_id (NULL = unpaid/self-employed)
+  NULL,   -- wage_cents
+  60,     -- pay_period_minutes
+  FALSE,  -- is_city_job
+  NULL    -- max_positions (NULL = unlimited)
 )
 ```
 
 If a seeded agent should hold it, add an assignment to `seed/agent_jobs.sql`:
 
 ```sql
-('some_agent_id', 'florist', TRUE, 'Starter assignment for the flower shop.')
+('some_agent_id', 'florist', TRUE, 'Starter assignment for the flower shop.', 'active')
 ```
 
 ## Example: add a new meta role
