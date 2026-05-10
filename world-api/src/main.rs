@@ -26,6 +26,11 @@ use routes::actions::{
     action_check_shelf_stock, action_restock_shelf, action_receive_delivery, action_order_delivery, action_clean_shop,
     action_list_job_openings, action_apply_for_job, action_check_payroll, action_pay_employee,
     action_resign_job, action_hire_applicant, action_fire_employee, action_collect_city_wage,
+    action_read_civic_board, action_file_complaint, action_nominate_for_hall_of_fame,
+    action_mayor_set_city_wage, action_mayor_fire_city_employee, action_mayor_post_announcement,
+    action_mayor_post_ordinance, action_mayor_resolve_complaint, action_mayor_veto_ordinance,
+    action_mayor_approve_city_job, action_call_election, action_nominate_self,
+    action_cast_vote, action_close_election,
     action_get_intention, action_get_inventory, action_get_transaction_log,
     action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
     action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
@@ -136,6 +141,20 @@ async fn main() -> AppResult<()> {
         .route("/actions/hire_applicant", post(action_hire_applicant))
         .route("/actions/fire_employee", post(action_fire_employee))
         .route("/actions/collect_city_wage", post(action_collect_city_wage))
+        .route("/actions/read_civic_board", post(action_read_civic_board))
+        .route("/actions/file_complaint", post(action_file_complaint))
+        .route("/actions/nominate_for_hall_of_fame", post(action_nominate_for_hall_of_fame))
+        .route("/actions/mayor_set_city_wage", post(action_mayor_set_city_wage))
+        .route("/actions/mayor_fire_city_employee", post(action_mayor_fire_city_employee))
+        .route("/actions/mayor_post_announcement", post(action_mayor_post_announcement))
+        .route("/actions/mayor_post_ordinance", post(action_mayor_post_ordinance))
+        .route("/actions/mayor_resolve_complaint", post(action_mayor_resolve_complaint))
+        .route("/actions/mayor_veto_ordinance", post(action_mayor_veto_ordinance))
+        .route("/actions/mayor_approve_city_job", post(action_mayor_approve_city_job))
+        .route("/actions/call_election", post(action_call_election))
+        .route("/actions/nominate_self", post(action_nominate_self))
+        .route("/actions/cast_vote", post(action_cast_vote))
+        .route("/actions/close_election", post(action_close_election))
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))

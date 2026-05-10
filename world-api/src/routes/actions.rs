@@ -1458,6 +1458,28 @@ pub async fn action_apply_for_job(
         return Err(AppError::BadRequest("you already have this job".to_string()));
     }
 
+    // Check max_positions
+    let max_pos: Option<i32> = sqlx::query_scalar(
+        r#"SELECT max_positions FROM jobs WHERE id = $1"#,
+    )
+    .bind(&payload.job_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+
+    if let Some(max) = max_pos {
+        let current_count: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*)::bigint FROM agent_jobs WHERE job_id = $1 AND status IN ('active', 'pending')"#,
+        )
+        .bind(&payload.job_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if current_count >= max as i64 {
+            return Err(AppError::BadRequest(format!("this position is full ({} of {})", current_count, max)));
+        }
+    }
+
     let status = if is_city_job {
         "active" // city jobs auto-approve
     } else {
@@ -2174,6 +2196,739 @@ pub async fn action_collect_city_wage(
         new_balance_cents: new_balance,
     })))
 }
+// ---------------------------------------------------------------------------
+// Civic system tools — mayor, elections, civic board
+// ---------------------------------------------------------------------------
+
+// Helper: get current mayor agent id
+async fn get_current_mayor(pool: &sqlx::PgPool) -> AppResult<String> {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT agent_id FROM mayor_terms WHERE is_current = TRUE LIMIT 1"#,
+    )
+    .fetch_optional(pool)
+    .await?
+    .ok_or(AppError::BadRequest("no current mayor".to_string()))
+}
+
+// Helper: check if agent is current mayor
+async fn is_mayor(pool: &sqlx::PgPool, agent_id: &str) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM mayor_terms WHERE agent_id = $1 AND is_current = TRUE)"#,
+    )
+    .bind(agent_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(false)
+}
+
+// --- Civic Board ---
+
+#[derive(Debug, Serialize)]
+pub struct CivicPost {
+    pub id: String,
+    pub r#type: String,
+    pub author_id: Option<String>,
+    pub title: String,
+    pub body: String,
+    pub status: String,
+    pub priority: i32,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+    pub resolved_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReadCivicBoardRequest {
+    pub r#type: Option<String>,
+}
+
+pub async fn action_read_civic_board(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<ReadCivicBoardRequest>,
+) -> AppResult<Json<ApiResponse<Vec<CivicPost>>>> {
+    let rows = if let Some(filter_type) = &payload.r#type {
+        sqlx::query(
+            r#"SELECT id, type, author_id, title, body, status, priority, created_at, resolved_at, resolved_by
+            FROM civic_posts WHERE type = $1 AND status = 'active' ORDER BY priority DESC, created_at DESC LIMIT 50"#,
+        )
+        .bind(filter_type)
+        .fetch_all(state.pool())
+        .await?
+    } else {
+        sqlx::query(
+            r#"SELECT id, type, author_id, title, body, status, priority, created_at, resolved_at, resolved_by
+            FROM civic_posts WHERE status = 'active' ORDER BY priority DESC, created_at DESC LIMIT 50"#,
+        )
+        .fetch_all(state.pool())
+        .await?
+    };
+
+    let posts: Vec<CivicPost> = rows.iter().map(|row| CivicPost {
+        id: row.get("id"),
+        r#type: row.get("type"),
+        author_id: row.get("author_id"),
+        title: row.get("title"),
+        body: row.get("body"),
+        status: row.get("status"),
+        priority: row.get("priority"),
+        created_at: row.get::<chrono::DateTime<chrono::Utc>, _>("created_at").to_rfc3339(),
+        resolved_at: row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("resolved_at").map(|dt| dt.to_rfc3339()),
+        resolved_by: row.get("resolved_by"),
+    }).collect();
+
+    Ok(Json(ApiResponse::from(posts)))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FileComplaintRequest {
+    pub title: String,
+    pub body: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CivicPostResponse {
+    pub id: String,
+    pub r#type: String,
+    pub title: String,
+    pub status: String,
+}
+
+pub async fn action_file_complaint(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<FileComplaintRequest>,
+) -> AppResult<Json<ApiResponse<CivicPostResponse>>> {
+    let id = format!("complaint_{}", Uuid::new_v4());
+    sqlx::query(
+        r#"INSERT INTO civic_posts (id, type, author_id, title, body, status) VALUES ($1, 'complaint', $2, $3, $4, 'active')"#,
+    )
+    .bind(&id)
+    .bind(&agent_id)
+    .bind(&payload.title)
+    .bind(&payload.body)
+    .execute(state.pool())
+    .await?;
+
+    Ok(Json(ApiResponse::from(CivicPostResponse {
+        id,
+        r#type: "complaint".to_string(),
+        title: payload.title,
+        status: "active".to_string(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NominateHallOfFameRequest {
+    pub nominee_id: String,
+    pub reason: String,
+}
+
+pub async fn action_nominate_for_hall_of_fame(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<NominateHallOfFameRequest>,
+) -> AppResult<Json<ApiResponse<CivicPostResponse>>> {
+    let id = format!("hof_{}", Uuid::new_v4());
+    let title = format!("Hall of Fame Nomination: {}", payload.nominee_id);
+    sqlx::query(
+        r#"INSERT INTO civic_posts (id, type, author_id, title, body, status, priority) VALUES ($1, 'hall_of_fame', $2, $3, $4, 'active', 5)"#,
+    )
+    .bind(&id)
+    .bind(&agent_id)
+    .bind(&title)
+    .bind(&payload.reason)
+    .execute(state.pool())
+    .await?;
+
+    Ok(Json(ApiResponse::from(CivicPostResponse {
+        id,
+        r#type: "hall_of_fame".to_string(),
+        title,
+        status: "active".to_string(),
+    })))
+}
+
+// --- Mayor Tools ---
+
+#[derive(Debug, Deserialize)]
+pub struct MayorSetWageRequest {
+    pub job_id: String,
+    pub wage_cents: i64,
+}
+
+pub async fn action_mayor_set_city_wage(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<MayorSetWageRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    if !is_mayor(state.pool(), &agent_id).await {
+        return Err(AppError::BadRequest("only the mayor can set city wages".to_string()));
+    }
+
+    if payload.wage_cents < 0 {
+        return Err(AppError::BadRequest("wage cannot be negative".to_string()));
+    }
+
+    let updated = sqlx::query(
+        r#"UPDATE jobs SET wage_cents = $1, updated_at = NOW() WHERE id = $2 AND is_city_job = TRUE"#,
+    )
+    .bind(payload.wage_cents)
+    .bind(&payload.job_id)
+    .execute(state.pool())
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::BadRequest("city job not found".to_string()));
+    }
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "job_id": &payload.job_id,
+        "new_wage_cents": payload.wage_cents
+    }))))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MayorFireCityEmployeeRequest {
+    pub employee_id: String,
+    pub reason: Option<String>,
+}
+
+pub async fn action_mayor_fire_city_employee(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<MayorFireCityEmployeeRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Check mayor status directly
+    let is_current_mayor = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM mayor_terms WHERE agent_id = $1 AND is_current = TRUE)"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !is_current_mayor {
+        return Err(AppError::BadRequest("only the mayor can fire city employees".to_string()));
+    }
+
+    // Find the employee's active city job
+    let job = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT j.id, j.name
+        FROM agent_jobs aj JOIN jobs j ON j.id = aj.job_id
+        WHERE aj.agent_id = $1 AND j.is_city_job = TRUE AND aj.status = 'active'
+        "#,
+    )
+    .bind(&payload.employee_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no active city job found for this agent".to_string()))?;
+
+    sqlx::query(
+        r#"UPDATE agent_jobs SET status = 'fired', resigned_at = NOW(), updated_at = NOW()
+        WHERE agent_id = $1 AND job_id = $2 AND status = 'active'"#,
+    )
+    .bind(&payload.employee_id)
+    .bind(&job.0)
+    .execute(&mut *tx)
+    .await?;
+
+    let reason = payload.reason.as_deref().unwrap_or("No reason given");
+    let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+        &mut tx, &payload.employee_id, "city_job_fired",
+        serde_json::json!({"job_id": &job.0, "reason": reason}),
+        format!("You've been fired from your city job ({}) — {}", job.1, reason),
+        serde_json::json!({"event_type": "job.fired", "job_id": &job.0}),
+        serde_json::json!([]), true,
+    ).await;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "employee_id": &payload.employee_id,
+        "job_name": job.1,
+        "status": "fired"
+    }))))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MayorPostRequest {
+    pub title: String,
+    pub body: String,
+}
+
+pub async fn action_mayor_post_announcement(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<MayorPostRequest>,
+) -> AppResult<Json<ApiResponse<CivicPostResponse>>> {
+    if !is_mayor(state.pool(), &agent_id).await {
+        return Err(AppError::BadRequest("only the mayor can post announcements".to_string()));
+    }
+
+    let id = format!("announcement_{}", Uuid::new_v4());
+    sqlx::query(
+        r#"INSERT INTO civic_posts (id, type, author_id, title, body, status, priority) VALUES ($1, 'announcement', $2, $3, $4, 'active', 10)"#,
+    )
+    .bind(&id)
+    .bind(&agent_id)
+    .bind(&payload.title)
+    .bind(&payload.body)
+    .execute(state.pool())
+    .await?;
+
+    Ok(Json(ApiResponse::from(CivicPostResponse {
+        id,
+        r#type: "announcement".to_string(),
+        title: payload.title,
+        status: "active".to_string(),
+    })))
+}
+
+pub async fn action_mayor_post_ordinance(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<MayorPostRequest>,
+) -> AppResult<Json<ApiResponse<CivicPostResponse>>> {
+    if !is_mayor(state.pool(), &agent_id).await {
+        return Err(AppError::BadRequest("only the mayor can post ordinances".to_string()));
+    }
+
+    let id = format!("ordinance_{}", Uuid::new_v4());
+    sqlx::query(
+        r#"INSERT INTO civic_posts (id, type, author_id, title, body, status, priority) VALUES ($1, 'ordinance', $2, $3, $4, 'active', 8)"#,
+    )
+    .bind(&id)
+    .bind(&agent_id)
+    .bind(&payload.title)
+    .bind(&payload.body)
+    .execute(state.pool())
+    .await?;
+
+    Ok(Json(ApiResponse::from(CivicPostResponse {
+        id,
+        r#type: "ordinance".to_string(),
+        title: payload.title,
+        status: "active".to_string(),
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MayorResolveRequest {
+    pub complaint_id: String,
+    pub resolution: String,
+}
+
+pub async fn action_mayor_resolve_complaint(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<MayorResolveRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    if !is_mayor(state.pool(), &agent_id).await {
+        return Err(AppError::BadRequest("only the mayor can resolve complaints".to_string()));
+    }
+
+    let updated = sqlx::query(
+        r#"UPDATE civic_posts SET status = 'resolved', resolved_at = NOW(), resolved_by = $1, updated_at = NOW()
+        WHERE id = $2 AND type = 'complaint' AND status = 'active'"#,
+    )
+    .bind(&agent_id)
+    .bind(&payload.complaint_id)
+    .execute(state.pool())
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::BadRequest("active complaint not found".to_string()));
+    }
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "complaint_id": &payload.complaint_id,
+        "status": "resolved",
+        "resolution": &payload.resolution
+    }))))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MayorVetoRequest {
+    pub ordinance_id: String,
+}
+
+pub async fn action_mayor_veto_ordinance(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<MayorVetoRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    if !is_mayor(state.pool(), &agent_id).await {
+        return Err(AppError::BadRequest("only the mayor can veto ordinances".to_string()));
+    }
+
+    let updated = sqlx::query(
+        r#"UPDATE civic_posts SET status = 'vetoed', resolved_at = NOW(), resolved_by = $1, updated_at = NOW()
+        WHERE id = $2 AND type = 'ordinance' AND status = 'active'"#,
+    )
+    .bind(&agent_id)
+    .bind(&payload.ordinance_id)
+    .execute(state.pool())
+    .await?;
+
+    if updated.rows_affected() == 0 {
+        return Err(AppError::BadRequest("active ordinance not found".to_string()));
+    }
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "ordinance_id": &payload.ordinance_id,
+        "status": "vetoed"
+    }))))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MayorApproveCityJobRequest {
+    pub applicant_id: String,
+    pub job_id: String,
+}
+
+pub async fn action_mayor_approve_city_job(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<MayorApproveCityJobRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let mut tx = state.pool().begin().await?;
+
+    let is_current_mayor = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM mayor_terms WHERE agent_id = $1 AND is_current = TRUE)"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !is_current_mayor {
+        return Err(AppError::BadRequest("only the mayor can approve city jobs".to_string()));
+    }
+
+    // Verify pending application for a city job
+    let pending = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj JOIN jobs j ON j.id = aj.job_id
+            WHERE aj.agent_id = $1 AND aj.job_id = $2 AND aj.status = 'pending' AND j.is_city_job = TRUE
+        )"#,
+    )
+    .bind(&payload.applicant_id)
+    .bind(&payload.job_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !pending {
+        return Err(AppError::BadRequest("no pending city job application found".to_string()));
+    }
+
+    // Check max_positions
+    let max_pos: Option<i32> = sqlx::query_scalar(
+        r#"SELECT max_positions FROM jobs WHERE id = $1"#,
+    )
+    .bind(&payload.job_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if let Some(max) = max_pos {
+        let current_count: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*)::bigint FROM agent_jobs WHERE job_id = $1 AND status = 'active'"#,
+        )
+        .bind(&payload.job_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if current_count >= max as i64 {
+            return Err(AppError::BadRequest(format!("this position is full ({} of {})", current_count, max)));
+        }
+    }
+
+    sqlx::query(
+        r#"UPDATE agent_jobs SET status = 'active', hired_at = NOW(), updated_at = NOW()
+        WHERE agent_id = $1 AND job_id = $2 AND status = 'pending'"#,
+    )
+    .bind(&payload.applicant_id)
+    .bind(&payload.job_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+        &mut tx, &payload.applicant_id, "city_job_approved",
+        serde_json::json!({"job_id": &payload.job_id}),
+        "Your city job application has been approved by the mayor!".to_string(),
+        serde_json::json!({"event_type": "job.approved", "job_id": &payload.job_id}),
+        serde_json::json!([]), true,
+    ).await;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "applicant_id": &payload.applicant_id,
+        "job_id": &payload.job_id,
+        "status": "active"
+    }))))
+}
+
+// --- Election Tools ---
+
+pub async fn action_call_election(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Check no open election exists
+    let has_open = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM elections WHERE status = 'open')"#,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if has_open {
+        return Err(AppError::BadRequest("an election is already in progress".to_string()));
+    }
+
+    // Only current mayor can call election (for now)
+    let is_current_mayor = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM mayor_terms WHERE agent_id = $1 AND is_current = TRUE)"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !is_current_mayor {
+        return Err(AppError::BadRequest("only the mayor can call an election".to_string()));
+    }
+
+    let election_id = format!("election_{}", Uuid::new_v4());
+    sqlx::query(
+        r#"INSERT INTO elections (id, status, called_by) VALUES ($1, 'open', $2)"#,
+    )
+    .bind(&election_id)
+    .bind(&agent_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "election_id": election_id,
+        "status": "open",
+        "called_by": agent_id
+    }))))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NominateSelfRequest {
+    pub platform: Option<String>,
+}
+
+pub async fn action_nominate_self(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<NominateSelfRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Find open election
+    let election_id: String = sqlx::query_scalar(
+        r#"SELECT id FROM elections WHERE status = 'open' LIMIT 1"#,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no open election".to_string()))?;
+
+    // Check not already nominated
+    let already = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM election_candidates WHERE election_id = $1 AND agent_id = $2)"#,
+    )
+    .bind(&election_id)
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if already {
+        return Err(AppError::BadRequest("you are already nominated".to_string()));
+    }
+
+    sqlx::query(
+        r#"INSERT INTO election_candidates (election_id, agent_id, platform) VALUES ($1, $2, $3)"#,
+    )
+    .bind(&election_id)
+    .bind(&agent_id)
+    .bind(&payload.platform)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "election_id": election_id,
+        "candidate": agent_id,
+        "status": "nominated"
+    }))))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CastVoteRequest {
+    pub candidate_id: String,
+}
+
+pub async fn action_cast_vote(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+    Json(payload): Json<CastVoteRequest>,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Find open election
+    let election_id: String = sqlx::query_scalar(
+        r#"SELECT id FROM elections WHERE status = 'open' LIMIT 1"#,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no open election".to_string()))?;
+
+    // Check not already voted
+    let already = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM election_votes WHERE election_id = $1 AND voter_id = $2)"#,
+    )
+    .bind(&election_id)
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if already {
+        return Err(AppError::BadRequest("you have already voted".to_string()));
+    }
+
+    // Verify candidate is nominated
+    let is_candidate = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM election_candidates WHERE election_id = $1 AND agent_id = $2)"#,
+    )
+    .bind(&election_id)
+    .bind(&payload.candidate_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !is_candidate {
+        return Err(AppError::BadRequest("candidate not found in this election".to_string()));
+    }
+
+    sqlx::query(
+        r#"INSERT INTO election_votes (election_id, voter_id, candidate_id) VALUES ($1, $2, $3)"#,
+    )
+    .bind(&election_id)
+    .bind(&agent_id)
+    .bind(&payload.candidate_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "election_id": election_id,
+        "voted_for": &payload.candidate_id
+    }))))
+}
+
+pub async fn action_close_election(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let mut tx = state.pool().begin().await?;
+
+    // Only mayor can close
+    let is_current_mayor = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM mayor_terms WHERE agent_id = $1 AND is_current = TRUE)"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if !is_current_mayor {
+        return Err(AppError::BadRequest("only the mayor can close an election".to_string()));
+    }
+
+    // Find open election
+    let election_id: String = sqlx::query_scalar(
+        r#"SELECT id FROM elections WHERE status = 'open' LIMIT 1"#,
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::BadRequest("no open election".to_string()))?;
+
+    // Count votes
+    let results: Vec<(String, i64)> = sqlx::query_as(
+        r#"SELECT candidate_id, COUNT(*)::bigint as votes FROM election_votes WHERE election_id = $1 GROUP BY candidate_id ORDER BY votes DESC"#,
+    )
+    .bind(&election_id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    if results.is_empty() {
+        return Err(AppError::BadRequest("no votes have been cast yet".to_string()));
+    }
+
+    // Winner = most votes (ties: incumbent stays)
+    let winner_id = results[0].0.clone();
+    let winner_votes = results[0].1;
+
+    // Close election
+    sqlx::query(
+        r#"UPDATE elections SET status = 'closed', closes_at = NOW() WHERE id = $1"#,
+    )
+    .bind(&election_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // End current mayor term
+    sqlx::query(
+        r#"UPDATE mayor_terms SET is_current = FALSE, ended_at = NOW(), end_reason = 'election', election_id = $1 WHERE is_current = TRUE"#,
+    )
+    .bind(&election_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Start new mayor term
+    sqlx::query(
+        r#"INSERT INTO mayor_terms (agent_id, election_id, is_current) VALUES ($1, $2, TRUE)"#,
+    )
+    .bind(&winner_id)
+    .bind(&election_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Update winner's job to mayor
+    sqlx::query(
+        r#"
+        INSERT INTO agent_jobs (agent_id, job_id, is_primary, status) VALUES ($1, 'mayor', TRUE, 'active')
+        ON CONFLICT (agent_id, job_id) DO UPDATE SET status = 'active'
+        "#,
+    )
+    .bind(&winner_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Wake the new mayor
+    let _ = crate::routes::citizens::enqueue_citizen_wake_tx(
+        &mut tx, &winner_id, "election_won",
+        serde_json::json!({"election_id": &election_id, "votes": winner_votes}),
+        format!("Congratulations! You won the mayoral election with {} votes!", winner_votes),
+        serde_json::json!({"event_type": "election.won"}),
+        serde_json::json!([]), true,
+    ).await;
+
+    tx.commit().await?;
+
+    Ok(Json(ApiResponse::from(serde_json::json!({
+        "election_id": election_id,
+        "winner": winner_id,
+        "votes": winner_votes,
+        "results": results.into_iter().map(|(id, v)| serde_json::json!({"candidate": id, "votes": v})).collect::<Vec<_>>()
+    }))))
+}
 
 pub async fn action_set_intention(
     State(state): State<AppState>,
@@ -2553,6 +3308,63 @@ pub async fn get_tool_manifest(
 
     if has_city_job {
         tools.push(tool_collect_city_wage());
+    }
+
+    // Civic system tools — based on location and mayor status
+    let at_townhall = agent_row.1.starts_with("townhall_");
+
+    // Civic board tools (available at townhall)
+    if at_townhall {
+        tools.push(tool_read_civic_board());
+        tools.push(tool_file_complaint());
+        if agent_row.1 == "townhall_civic_board" {
+            tools.push(tool_nominate_for_hall_of_fame());
+        }
+    }
+
+    // Mayor tools — only for current mayor
+    let is_current_mayor = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM mayor_terms WHERE agent_id = $1 AND is_current = TRUE)"#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if is_current_mayor {
+        tools.push(tool_mayor_set_city_wage());
+        tools.push(tool_mayor_fire_city_employee());
+        tools.push(tool_mayor_post_announcement());
+        tools.push(tool_mayor_post_ordinance());
+        tools.push(tool_mayor_resolve_complaint());
+        tools.push(tool_mayor_veto_ordinance());
+        tools.push(tool_call_election());
+        tools.push(tool_close_election());
+
+        // Pending city job applications → mayor can approve
+        let has_pending_city_apps = sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                SELECT 1 FROM agent_jobs aj JOIN jobs j ON j.id = aj.job_id
+                WHERE j.is_city_job = TRUE AND aj.status = 'pending'
+            )"#,
+        )
+        .fetch_one(state.pool())
+        .await?;
+
+        if has_pending_city_apps {
+            tools.push(tool_mayor_approve_city_job());
+        }
+    }
+
+    // Election tools — available when election is open
+    let has_open_election = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM elections WHERE status = 'open')"#,
+    )
+    .fetch_one(state.pool())
+    .await?;
+
+    if has_open_election {
+        tools.push(tool_nominate_self());
+        tools.push(tool_cast_vote());
     }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -3274,6 +4086,226 @@ fn tool_collect_city_wage() -> WorldToolDefinition {
         name: "collect_city_wage".to_string(),
         description: "Collect your salary from the city treasury. Only available if you have a city job and enough time has passed since last pay.".to_string(),
         endpoint: "/actions/collect_city_wage".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_read_civic_board() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "read_civic_board".to_string(),
+        description: "Read complaints, hall of fame nominations, ordinances, and announcements from the civic board.".to_string(),
+        endpoint: "/actions/read_civic_board".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "description": "Filter by type: complaint, hall_of_fame, ordinance, announcement"}
+            },
+            "required": []
+        }),
+    }
+}
+
+fn tool_file_complaint() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "file_complaint".to_string(),
+        description: "File a formal complaint at the townhall. The mayor can resolve it.".to_string(),
+        endpoint: "/actions/file_complaint".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short title for the complaint."},
+                "body": {"type": "string", "description": "Detailed description of the complaint."}
+            },
+            "required": ["title", "body"]
+        }),
+    }
+}
+
+fn tool_nominate_for_hall_of_fame() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "nominate_for_hall_of_fame".to_string(),
+        description: "Nominate a fellow citizen for the town hall of fame.".to_string(),
+        endpoint: "/actions/nominate_for_hall_of_fame".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "nominee_id": {"type": "string", "description": "The citizen to nominate."},
+                "reason": {"type": "string", "description": "Why they deserve recognition."}
+            },
+            "required": ["nominee_id", "reason"]
+        }),
+    }
+}
+
+fn tool_mayor_set_city_wage() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "mayor_set_city_wage".to_string(),
+        description: "Set the wage for a city job. Mayor only.".to_string(),
+        endpoint: "/actions/mayor_set_city_wage".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "string", "description": "The city job to adjust."},
+                "wage_cents": {"type": "integer", "description": "New wage per pay period in cents."}
+            },
+            "required": ["job_id", "wage_cents"]
+        }),
+    }
+}
+
+fn tool_mayor_fire_city_employee() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "mayor_fire_city_employee".to_string(),
+        description: "Fire a city employee. Mayor only.".to_string(),
+        endpoint: "/actions/mayor_fire_city_employee".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "employee_id": {"type": "string", "description": "Who to fire."},
+                "reason": {"type": "string", "description": "Why."}
+            },
+            "required": ["employee_id"]
+        }),
+    }
+}
+
+fn tool_mayor_post_announcement() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "mayor_post_announcement".to_string(),
+        description: "Post an official town announcement. Mayor only.".to_string(),
+        endpoint: "/actions/mayor_post_announcement".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Announcement title."},
+                "body": {"type": "string", "description": "Announcement body."}
+            },
+            "required": ["title", "body"]
+        }),
+    }
+}
+
+fn tool_mayor_post_ordinance() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "mayor_post_ordinance".to_string(),
+        description: "Post a town ordinance (a rule agents should follow). Mayor only.".to_string(),
+        endpoint: "/actions/mayor_post_ordinance".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Ordinance title."},
+                "body": {"type": "string", "description": "Ordinance body."}
+            },
+            "required": ["title", "body"]
+        }),
+    }
+}
+
+fn tool_mayor_resolve_complaint() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "mayor_resolve_complaint".to_string(),
+        description: "Resolve an active complaint. Mayor only.".to_string(),
+        endpoint: "/actions/mayor_resolve_complaint".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "complaint_id": {"type": "string", "description": "The complaint to resolve."},
+                "resolution": {"type": "string", "description": "How it was resolved."}
+            },
+            "required": ["complaint_id", "resolution"]
+        }),
+    }
+}
+
+fn tool_mayor_veto_ordinance() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "mayor_veto_ordinance".to_string(),
+        description: "Repeal an existing ordinance. Mayor only.".to_string(),
+        endpoint: "/actions/mayor_veto_ordinance".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "ordinance_id": {"type": "string", "description": "The ordinance to repeal."}
+            },
+            "required": ["ordinance_id"]
+        }),
+    }
+}
+
+fn tool_mayor_approve_city_job() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "mayor_approve_city_job".to_string(),
+        description: "Approve a pending city job application. Mayor only.".to_string(),
+        endpoint: "/actions/mayor_approve_city_job".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "applicant_id": {"type": "string", "description": "Who applied."},
+                "job_id": {"type": "string", "description": "Which city job."}
+            },
+            "required": ["applicant_id", "job_id"]
+        }),
+    }
+}
+
+fn tool_call_election() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "call_election".to_string(),
+        description: "Call a new mayoral election. Mayor only.".to_string(),
+        endpoint: "/actions/call_election".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_nominate_self() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "nominate_self".to_string(),
+        description: "Nominate yourself for mayor in the current election.".to_string(),
+        endpoint: "/actions/nominate_self".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "platform": {"type": "string", "description": "Your campaign platform."}
+            },
+            "required": []
+        }),
+    }
+}
+
+fn tool_cast_vote() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "cast_vote".to_string(),
+        description: "Vote for a mayoral candidate in the current election. One vote per agent.".to_string(),
+        endpoint: "/actions/cast_vote".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "candidate_id": {"type": "string", "description": "Who you're voting for."}
+            },
+            "required": ["candidate_id"]
+        }),
+    }
+}
+
+fn tool_close_election() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "close_election".to_string(),
+        description: "Close the current election and declare a winner (most votes wins). Mayor only.".to_string(),
+        endpoint: "/actions/close_election".to_string(),
         method: "POST".to_string(),
         parameters: json!({"type": "object", "properties": {}, "required": []}),
     }

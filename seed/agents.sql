@@ -44,16 +44,16 @@ VALUES
   (
     'klaus_mueller',
     'Klaus Mueller',
-    'Professor',
-    'Methodical and caffeinated, teaches long sessions.',
-    'oak_staff_office',
-    'idle',
-    NULL,
+    'Mayor',
+    'Methodical and caffeinated. Now serves as the town mayor, managing civic affairs.',
+    'townhall_mayor_office',
+    'working',
+    'Working at the mayor''s desk',
     TRUE,
     TRUE,
     'placeholder_klaus_mueller',
     NULL,
-    'oak_staff_office'
+    'townhall_mayor_office'
   ),
   (
     'maria_lopez',

@@ -39,6 +39,28 @@ VALUES
   ('riverside_clinic_lobby', 'ville_park_west', 55),
   ('ville_park_west', 'riverside_clinic_lobby', 55),
   ('riverside_clinic_lobby', 'harvey_oak_entrance', 75),
-  ('harvey_oak_entrance', 'riverside_clinic_lobby', 75)
+  ('harvey_oak_entrance', 'riverside_clinic_lobby', 75),
+  -- Townhall internal connections
+  ('townhall_mayor_office', 'townhall_assembly', 8),
+  ('townhall_assembly', 'townhall_mayor_office', 8),
+  ('townhall_mayor_office', 'townhall_civic_board', 8),
+  ('townhall_civic_board', 'townhall_mayor_office', 8),
+  ('townhall_mayor_office', 'townhall_voting_booth', 8),
+  ('townhall_voting_booth', 'townhall_mayor_office', 8),
+  ('townhall_assembly', 'townhall_civic_board', 5),
+  ('townhall_civic_board', 'townhall_assembly', 5),
+  ('townhall_assembly', 'townhall_voting_booth', 5),
+  ('townhall_voting_booth', 'townhall_assembly', 5),
+  ('townhall_civic_board', 'townhall_voting_booth', 5),
+  ('townhall_voting_booth', 'townhall_civic_board', 5),
+  -- Townhall to town center
+  ('townhall_mayor_office', 'notice_board', 30),
+  ('notice_board', 'townhall_mayor_office', 30),
+  ('townhall_assembly', 'notice_board', 25),
+  ('notice_board', 'townhall_assembly', 25),
+  ('townhall_civic_board', 'notice_board', 20),
+  ('notice_board', 'townhall_civic_board', 20),
+  ('townhall_voting_booth', 'notice_board', 20),
+  ('notice_board', 'townhall_voting_booth', 20)
 ON CONFLICT (from_id, to_id) DO UPDATE
 SET travel_secs = EXCLUDED.travel_secs;
