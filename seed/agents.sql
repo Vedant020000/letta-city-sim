@@ -121,7 +121,7 @@ VALUES
     NULL,
     TRUE,
     TRUE,
-    NULL,
+    'placeholder_city_treasury',
     NULL,
     'notice_board'
   )
