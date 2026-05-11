@@ -2,7 +2,7 @@
     Json,
     extract::{Path, State},
 };
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -74,6 +74,8 @@ pub struct LookAroundResponse {
     pub objects: Vec<WorldObject>,
     pub agents_present: Vec<LookAroundAgent>,
     pub items_on_ground: Vec<InventoryItem>,
+    pub time_of_day: String,
+    pub hour: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -332,12 +334,19 @@ pub async fn action_look_around(
     .fetch_all(state.pool())
     .await?;
 
+    // Add time context
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
+    let hour = sim_time.hour();
+    let time_of_day = crate::routes::world::time_of_day_from_hour(hour).to_string();
+
     Ok(Json(ApiResponse::from(LookAroundResponse {
         location,
         nearby,
         objects,
         agents_present,
         items_on_ground,
+        time_of_day,
+        hour,
     })))
 }
 
@@ -585,6 +594,27 @@ pub async fn action_buy_item(
     if item.held_by.is_some() {
         return Err(AppError::BadRequest("item is not for sale".to_string()));
     }
+
+    // Check if the shop is open
+    let item_location = item.location_id.as_deref().ok_or_else(|| {
+        AppError::BadRequest("item has no location".to_string())
+    })?;
+    let location_prefix = item_location.split('_').take(2).collect::<Vec<_>>().join("_");
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
+    let sim_hour = sim_time.hour() as i16;
+    let shop_open = sqlx::query_scalar::<_, bool>(
+        r#"SELECT COALESCE(opens_at <= $1 AND closes_at > $1, true) FROM shops WHERE location_prefix = $2 AND is_active = TRUE"#,
+    )
+    .bind(sim_hour)
+    .bind(&location_prefix)
+    .fetch_optional(state.pool())
+    .await?
+    .unwrap_or(true); // default to open if not a shop
+
+    if !shop_open {
+        return Err(AppError::BadRequest("the shop is closed right now".to_string()));
+    }
+
     let item_location = item.location_id.as_deref().ok_or_else(|| {
         AppError::BadRequest("item has no location".to_string())
     })?;
@@ -1398,6 +1428,8 @@ pub struct JobOpening {
 pub struct BrowseShopResponse {
     pub shop_name: String,
     pub shop_id: String,
+    pub open: bool,
+    pub hours: String,
     pub items: Vec<InventoryItem>,
 }
 
@@ -1415,13 +1447,19 @@ pub async fn action_browse_shop(
     let prefix = agent_loc.split('_').take(2).collect::<Vec<_>>().join("_");
 
     // Find shop matching this location prefix
-    let shop = sqlx::query_as::<_, (String, String)>(
-        r#"SELECT id, name FROM shops WHERE location_prefix = $1 AND is_active = TRUE"#,
+    let shop = sqlx::query_as::<_, (String, String, i16, i16)>(
+        r#"SELECT id, name, opens_at, closes_at FROM shops WHERE location_prefix = $1 AND is_active = TRUE"#,
     )
     .bind(&prefix)
     .fetch_optional(state.pool())
     .await?
     .ok_or(AppError::BadRequest("you're not at a shop".to_string()))?;
+
+    // Check if shop is open
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
+    let sim_hour = sim_time.hour() as i16;
+    let open = shop.2 <= sim_hour && shop.3 > sim_hour;
+    let hours = format!("{}am - {}pm", shop.2, if shop.3 > 12 { shop.3 - 12 } else { shop.3 });
 
     // Get shelf items (priced, not held, not backroom)
     let items = sqlx::query_as::<_, InventoryItem>(
@@ -1440,6 +1478,8 @@ pub async fn action_browse_shop(
     Ok(Json(ApiResponse::from(BrowseShopResponse {
         shop_id: shop.0,
         shop_name: shop.1,
+        open,
+        hours,
         items,
     })))
 }
@@ -3015,6 +3055,18 @@ pub async fn action_close_election(
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Time of day
+// ---------------------------------------------------------------------------
+
+pub async fn action_check_world_time(
+    State(state): State<AppState>,
+) -> AppResult<Json<ApiResponse<crate::models::world::WorldTimeResponse>>> {
+    let Json(world_time) = crate::routes::world::get_world_time(State(state)).await?;
+    Ok(Json(ApiResponse::from(world_time)))
+}
+
+// ---------------------------------------------------------------------------
 // Hygiene & appearance actions
 // ---------------------------------------------------------------------------
 
@@ -3505,6 +3557,7 @@ pub async fn get_tool_manifest(
         tool_request_money(),
         tool_get_transaction_log(),
         tool_check_vitals(),
+        tool_check_world_time(),
         tool_set_intention(),
         tool_complete_intention(),
         tool_get_intention(),
@@ -3536,7 +3589,20 @@ pub async fn get_tool_manifest(
         tools.push(tool_respond_money_request());
     }
 
-    // Check for priced items at current location (shop shelves)
+    // Check for priced items at current location (shop shelves) — only if shop is open
+    let location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
+    let sim_hour = sim_time.hour() as i16;
+
+    let shop_open = sqlx::query_scalar::<_, bool>(
+        r#"SELECT COALESCE(opens_at <= $1 AND closes_at > $1, true) FROM shops WHERE location_prefix = $2 AND is_active = TRUE"#,
+    )
+    .bind(sim_hour)
+    .bind(&location_prefix)
+    .fetch_optional(state.pool())
+    .await?
+    .unwrap_or(true); // default to open if not at a shop
+
     let has_priced_items = sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
@@ -3549,7 +3615,7 @@ pub async fn get_tool_manifest(
     .fetch_one(state.pool())
     .await?;
 
-    if has_priced_items {
+    if has_priced_items && shop_open {
         tools.push(tool_buy_item());
     }
 
@@ -4724,6 +4790,16 @@ fn tool_close_election() -> WorldToolDefinition {
         name: "close_election".to_string(),
         description: "Close the current election and declare a winner (most votes wins). Mayor only.".to_string(),
         endpoint: "/actions/close_election".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_check_world_time() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_world_time".to_string(),
+        description: "Check the current time of day in the simulation. Returns the hour, time-of-day label (morning/afternoon/evening/night), day number, and whether shops are open.".to_string(),
+        endpoint: "/actions/check_world_time".to_string(),
         method: "POST".to_string(),
         parameters: json!({"type": "object", "properties": {}, "required": []}),
     }

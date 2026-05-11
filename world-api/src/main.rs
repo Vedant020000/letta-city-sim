@@ -34,6 +34,7 @@ use routes::actions::{
     action_wash_up, action_shower, action_brush_teeth, action_get_ready,
     action_bathe, action_swim, action_groom,
     action_browse_shop,
+    action_check_world_time,
     action_get_intention, action_get_inventory, action_get_transaction_log,
     action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
     action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
@@ -67,7 +68,7 @@ use routes::pathfind::get_path;
 use routes::pulse::get_town_pulse;
 use routes::sleep::{start_sleep, wake_up};
 use routes::tokens::{create_agent_token, list_agent_tokens, revoke_agent_token};
-use routes::world::get_world_time;
+use routes::world::{get_world_time, update_world_time};
 use routes::conversations::{
     get_conversation_detail, list_active_conversations,
 };
@@ -104,7 +105,7 @@ async fn main() -> AppResult<()> {
         .route("/ws/events", get(ws_events))
         .route("/ws/citizen", get(ws_citizen))
         .route("/locations", get(list_locations))
-        .route("/world/time", get(get_world_time))
+        .route("/world/time", get(get_world_time).patch(update_world_time))
         .route("/v1/citizen/action", post(citizen_action))
         .route("/actions/set_activity", post(action_set_activity))
         .route("/actions/move_to", post(action_move_to))
@@ -166,6 +167,7 @@ async fn main() -> AppResult<()> {
         .route("/actions/swim", post(action_swim))
         .route("/actions/groom", post(action_groom))
         .route("/actions/browse_shop", post(action_browse_shop))
+        .route("/actions/check_world_time", post(action_check_world_time))
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))

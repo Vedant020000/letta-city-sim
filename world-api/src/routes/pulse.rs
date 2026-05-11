@@ -81,32 +81,28 @@ pub async fn get_town_pulse(
 }
 
 async fn load_world_time(state: &AppState) -> AppResult<WorldTimeResponse> {
-    let paused = sqlx::query_scalar::<_, bool>(
-        r#"
-        SELECT COALESCE((value->>'simulation_paused')::boolean, false)
-        FROM simulation_state
-        WHERE key = 'world'
-        LIMIT 1
-        "#,
+    let (sim_time, time_scale, paused, epoch) = crate::routes::world::compute_sim_time(state.pool()).await;
+
+    let world_paused = sqlx::query_scalar::<_, bool>(
+        r#"SELECT COALESCE((value->>'simulation_paused')::boolean, false) FROM simulation_state WHERE key = 'world' LIMIT 1"#,
     )
     .fetch_optional(state.pool())
     .await?
     .unwrap_or(false);
 
-    let now_utc = Utc::now();
-    let hour = Local::now().hour();
-    let time_of_day = match hour {
-        5..=10 => "morning",
-        11..=16 => "afternoon",
-        17..=20 => "evening",
-        _ => "night",
-    }
-    .to_string();
+    let is_paused = paused || world_paused;
+    let hour = sim_time.hour();
+    let time_of_day = crate::routes::world::time_of_day_from_hour(hour).to_string();
+    let day_number = crate::routes::world::day_number_from_sim_time(&sim_time, epoch.as_ref());
+    let shops_open = crate::routes::world::any_shop_open(state.pool(), hour).await;
 
     Ok(WorldTimeResponse {
-        timestamp: now_utc.to_rfc3339(),
+        timestamp: sim_time.to_rfc3339(),
+        hour,
         time_of_day,
-        simulation_paused: paused,
+        day_number,
+        shops_open,
+        simulation_paused: is_paused,
     })
 }
 

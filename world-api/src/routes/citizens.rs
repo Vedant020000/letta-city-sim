@@ -8,7 +8,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -901,6 +901,39 @@ async fn load_agent_wake_snapshot_tx(
     // Apply vitals decay before reading (uses the agent's current state + last_vitals_update)
     let agent = crate::routes::vitals::apply_vitals_decay_tx(tx, agent_id).await?;
 
+    // Compute sim time inline (can't use compute_sim_time because it takes &PgPool)
+    let config_row = sqlx::query_scalar::<_, String>(
+        r#"SELECT value::text FROM simulation_state WHERE key = 'time'"#,
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    let now_wall = chrono::Utc::now();
+    let (sim_time, epoch): (chrono::DateTime<chrono::Utc>, Option<chrono::DateTime<chrono::Utc>>) = match config_row {
+        Some(raw_json) => {
+            let parsed: serde_json::Value = serde_json::from_str(&raw_json).unwrap_or_default();
+            let ts = parsed.get("time_scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let paused = parsed.get("paused").and_then(|v| v.as_bool()).unwrap_or(false);
+            let epoch = parsed.get("epoch_start")
+                .and_then(|v| v.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc));
+
+            match (epoch, paused) {
+                (Some(ep), false) => {
+                    let wall_elapsed = (now_wall - ep).num_seconds() as f64;
+                    let sim_elapsed = wall_elapsed * ts;
+                    let st = ep + chrono::Duration::seconds(sim_elapsed as i64);
+                    (st, Some(ep))
+                }
+                (Some(ep), true) => (ep, Some(ep)),
+                _ => (now_wall, None),
+            }
+        }
+        None => (now_wall, None),
+    };
+    let sim_hour = sim_time.hour();
+
     let snapshot = sqlx::query_as::<_, AgentWakeSnapshotRow>(
         r#"
         SELECT a.id, a.name, a.current_location_id, l.name AS location_name
@@ -960,6 +993,11 @@ async fn load_agent_wake_snapshot_tx(
             "appearance_level": agent.appearance_level,
         },
         "inventory": inventory_json,
+        "world_time": {
+            "hour": sim_hour,
+            "time_of_day": crate::routes::world::time_of_day_from_hour(sim_hour),
+            "day_number": crate::routes::world::day_number_from_sim_time(&sim_time, epoch.as_ref()),
+        },
     }))
 }
 
