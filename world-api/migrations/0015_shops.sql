@@ -18,4 +18,4 @@ VALUES ('harvey_oak', 'Harvey Oak Supermart', 'harvey_oak', 'rosie_kim', 'shopke
 
 -- Seed Hobbs Cafe
 INSERT INTO shops (id, name, location_prefix, owner_id, shopkeeper_job_id, balance_cents)
-VALUES ('hobbs_cafe', 'Hobbs Cafe', 'hobbs_cafe', 'isabella_morgan', 'cafe_owner', 30000);
+VALUES ('hobbs_cafe', 'Hobbs Cafe', 'hobbs_cafe', 'isabella_rodriguez', 'cafe_owner', 30000);

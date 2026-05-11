@@ -797,12 +797,13 @@ pub async fn action_check_shelf_stock(
 
     let prefix = location_prefix.split('_').take(2).collect::<Vec<_>>().join("_");
 
-    // Shelf items (priced, on aisle)
+    // Shelf items (priced, not backroom)
     let shelf_items = sqlx::query_as::<_, InventoryItem>(
         r#"
         SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
         FROM inventory_items
         WHERE location_id LIKE $1 AND price_cents IS NOT NULL AND held_by IS NULL
+          AND (state->>'backroom' IS NULL OR state->>'backroom' = 'false')
         ORDER BY name
         "#,
     )
@@ -837,11 +838,11 @@ pub async fn action_check_shelf_stock(
     .fetch_all(state.pool())
     .await?;
 
-    // Shop balance (shopkeeper's balance)
+    // Shop balance (from shops table)
     let shop_balance_cents = sqlx::query_scalar::<_, i64>(
-        r#"SELECT balance_cents FROM agents WHERE id = $1"#,
+        r#"SELECT balance_cents FROM shops WHERE location_prefix = $1 AND is_active = TRUE"#,
     )
-    .bind(&agent_id)
+    .bind(&prefix)
     .fetch_one(state.pool())
     .await?;
 
@@ -902,8 +903,20 @@ pub async fn action_restock_shelf(
         return Err(AppError::BadRequest("item is not at your shop".to_string()));
     }
 
-    // Get the aisle location for this shop
-    let aisle_location = format!("{}_aisle", prefix);
+    // Find the shelf location for this shop — prefer a location that already has priced items,
+    // otherwise use the agent's current location
+    let shelf_location = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT location_id FROM inventory_items
+        WHERE location_id LIKE $1 AND price_cents IS NOT NULL AND held_by IS NULL
+          AND (state->>'backroom' IS NULL OR state->>'backroom' = 'false')
+        LIMIT 1
+        "#,
+    )
+    .bind(format!("{}%", prefix))
+    .fetch_optional(&mut *tx)
+    .await?
+    .unwrap_or_else(|| agent_loc.clone());
 
     // Move item to aisle, set price, remove backroom flag
     let restock_price = item.state.get("restock_price")
@@ -919,7 +932,7 @@ pub async fn action_restock_shelf(
         WHERE id = $3
         "#,
     )
-    .bind(&aisle_location)
+    .bind(&shelf_location)
     .bind(restock_price)
     .bind(&payload.item_id)
     .execute(&mut *tx)
@@ -938,7 +951,7 @@ pub async fn action_restock_shelf(
     )
     .bind("agent.restocked_shelf")
     .bind(&agent_id)
-    .bind(&aisle_location)
+    .bind(&shelf_location)
     .bind(format!("Agent {} restocked {} x{}", agent_id, item.name, item.quantity))
     .bind(serde_json::json!({"item_id": &payload.item_id, "item_name": &item.name, "quantity": item.quantity, "price_cents": restock_price}).to_string())
     .bind(Utc::now())
@@ -1410,12 +1423,13 @@ pub async fn action_browse_shop(
     .await?
     .ok_or(AppError::BadRequest("you're not at a shop".to_string()))?;
 
-    // Get shelf items (priced, not held)
+    // Get shelf items (priced, not held, not backroom)
     let items = sqlx::query_as::<_, InventoryItem>(
         r#"
         SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
         FROM inventory_items
         WHERE location_id LIKE $1 AND price_cents IS NOT NULL AND held_by IS NULL
+          AND (state->>'backroom' IS NULL OR state->>'backroom' = 'false')
         ORDER BY consumable_type, name
         "#,
     )
