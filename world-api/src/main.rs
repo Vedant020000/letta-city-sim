@@ -33,6 +33,7 @@ use routes::actions::{
     action_cast_vote, action_close_election,
     action_wash_up, action_shower, action_brush_teeth, action_get_ready,
     action_bathe, action_swim, action_groom,
+    action_browse_shop,
     action_get_intention, action_get_inventory, action_get_transaction_log,
     action_join_conversation, action_leave_conversation, action_look_around, action_move_to,
     action_pay_agent, action_pick_up_item, action_request_money, action_respond_money_request,
@@ -164,6 +165,7 @@ async fn main() -> AppResult<()> {
         .route("/actions/bathe", post(action_bathe))
         .route("/actions/swim", post(action_swim))
         .route("/actions/groom", post(action_groom))
+        .route("/actions/browse_shop", post(action_browse_shop))
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))

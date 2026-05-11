@@ -636,16 +636,19 @@ pub async fn action_buy_item(
     .await?
     .ok_or_else(|| AppError::BadRequest("insufficient balance".to_string()))?;
 
-    // Credit shopkeeper (if one exists at this shop — same location prefix, e.g. harvey_oak_*)
+    // Credit shopkeeper (if one exists at this shop — via shops table)
     let location_prefix = item_location.split('_').take(2).collect::<Vec<_>>().join("_");
     let shopkeeper_id: Option<String> = sqlx::query_scalar(
         r#"
-        SELECT id FROM agents
-        WHERE occupation = 'Shopkeeper' AND is_active = TRUE
-          AND current_location_id LIKE $1
+        SELECT a.id FROM agents a
+        JOIN agent_jobs aj ON aj.agent_id = a.id
+        JOIN shops s ON s.shopkeeper_job_id = aj.job_id
+        WHERE s.location_prefix = $1 AND aj.status = 'active' AND a.is_active = TRUE
+          AND a.current_location_id LIKE $2
         LIMIT 1
         "#,
     )
+    .bind(&location_prefix)
     .bind(format!("{}%", location_prefix))
     .fetch_optional(&mut *tx)
     .await?;
@@ -1371,6 +1374,60 @@ pub struct JobOpening {
     pub wage_cents: Option<i64>,
     pub is_city_job: bool,
     pub active_employees: i64,
+}
+
+
+// ---------------------------------------------------------------------------
+// Shop browsing (customer-facing)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct BrowseShopResponse {
+    pub shop_name: String,
+    pub shop_id: String,
+    pub items: Vec<InventoryItem>,
+}
+
+pub async fn action_browse_shop(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<BrowseShopResponse>>> {
+    let agent_loc = sqlx::query_scalar::<_, String>(
+        r#"SELECT current_location_id FROM agents WHERE id = $1"#,
+    )
+    .bind(&agent_id)
+    .fetch_one(state.pool())
+    .await?;
+
+    let prefix = agent_loc.split('_').take(2).collect::<Vec<_>>().join("_");
+
+    // Find shop matching this location prefix
+    let shop = sqlx::query_as::<_, (String, String)>(
+        r#"SELECT id, name FROM shops WHERE location_prefix = $1 AND is_active = TRUE"#,
+    )
+    .bind(&prefix)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or(AppError::BadRequest("you're not at a shop".to_string()))?;
+
+    // Get shelf items (priced, not held)
+    let items = sqlx::query_as::<_, InventoryItem>(
+        r#"
+        SELECT id, name, held_by, location_id, state, quantity, consumable_type, vital_value, price_cents
+        FROM inventory_items
+        WHERE location_id LIKE $1 AND price_cents IS NOT NULL AND held_by IS NULL
+        ORDER BY consumable_type, name
+        "#,
+    )
+    .bind(format!("{}%", prefix))
+    .fetch_all(state.pool())
+    .await?;
+
+    Ok(Json(ApiResponse::from(BrowseShopResponse {
+        shop_id: shop.0,
+        shop_name: shop.1,
+        items,
+    })))
 }
 
 pub async fn action_list_job_openings(
@@ -3482,51 +3539,71 @@ pub async fn get_tool_manifest(
         tools.push(tool_buy_item());
     }
 
-    // Shopkeeper tools — only for agents with occupation 'Shopkeeper' at a shop location
-    let is_shopkeeper = agent_row.4 == "Shopkeeper";
-    let at_shop = agent_row.1.starts_with("harvey_oak_");
+    // Browse shop — available when at any active shop location
+    let at_shop = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM shops WHERE location_prefix = $1 AND is_active = TRUE)"#,
+    )
+    .bind(agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_"))
+    .fetch_one(state.pool())
+    .await?;
 
-    if is_shopkeeper && at_shop {
-        // Always available for shopkeepers at their shop
-        tools.push(tool_check_shelf_stock());
-        tools.push(tool_clean_shop());
+    if at_shop {
+        tools.push(tool_browse_shop());
+    }
 
-        // Conditional: restock when backroom items exist
-        let location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
-        let has_backroom_items = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS(
-                SELECT 1 FROM inventory_items
-                WHERE location_id LIKE $1 AND price_cents IS NULL AND held_by IS NULL
-                  AND state->>'backroom' = 'true'
+    // Shopkeeper tools — based on shops table (agent holds a shop's shopkeeper_job_id and is at that shop)
+    let shop_info = sqlx::query_as::<_, (String, String)>(
+        r#"SELECT s.id, s.location_prefix FROM shops s
+        JOIN agent_jobs aj ON aj.job_id = s.shopkeeper_job_id
+        WHERE aj.agent_id = $1 AND aj.status = 'active' AND s.is_active = TRUE"#,
+    )
+    .bind(&agent_row.0)
+    .fetch_optional(state.pool())
+    .await?;
+
+    if let Some((shop_id, shop_prefix)) = shop_info {
+        let at_own_shop = agent_row.1.starts_with(&format!("{}_", shop_prefix));
+
+        if at_own_shop {
+            tools.push(tool_check_shelf_stock());
+            tools.push(tool_clean_shop());
+
+            // Conditional: restock when backroom items exist
+            let has_backroom_items = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM inventory_items
+                    WHERE location_id LIKE $1 AND price_cents IS NULL AND held_by IS NULL
+                      AND state->>'backroom' = 'true'
+                )
+                "#,
             )
-            "#,
-        )
-        .bind(format!("{}%", location_prefix))
-        .fetch_one(state.pool())
-        .await?;
+            .bind(format!("{}%", shop_prefix))
+            .fetch_one(state.pool())
+            .await?;
 
-        if has_backroom_items {
-            tools.push(tool_restock_shelf());
-        }
+            if has_backroom_items {
+                tools.push(tool_restock_shelf());
+            }
 
-        // Conditional: receive_delivery when pending delivery exists
-        let has_pending_delivery = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS(
-                SELECT 1 FROM world_objects
-                WHERE location_id LIKE $1 AND state->>'delivery_pending' = 'true'
+            // Conditional: receive_delivery when pending delivery exists
+            let has_pending_delivery = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM world_objects
+                    WHERE location_id LIKE $1 AND state->>'delivery_pending' = 'true'
+                )
+                "#,
             )
-            "#,
-        )
-        .bind(format!("{}%", location_prefix))
-        .fetch_one(state.pool())
-        .await?;
+            .bind(format!("{}%", shop_prefix))
+            .fetch_one(state.pool())
+            .await?;
 
-        if has_pending_delivery {
-            tools.push(tool_receive_delivery());
-        } else {
-            tools.push(tool_order_delivery());
+            if has_pending_delivery {
+                tools.push(tool_receive_delivery());
+            } else {
+                tools.push(tool_order_delivery());
+            }
         }
     }
 
@@ -4289,6 +4366,16 @@ fn tool_clean_shop() -> WorldToolDefinition {
             "properties": {},
             "required": []
         }),
+    }
+}
+
+fn tool_browse_shop() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "browse_shop".to_string(),
+        description: "Browse items for sale at the shop you're currently in. Shows item names, prices, quantities, and what vital they restore.".to_string(),
+        endpoint: "/actions/browse_shop".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
     }
 }
 

@@ -11,7 +11,8 @@ VALUES
   ('shelf_drinks_harvey', 'Drinks Shelf', 'harvey_oak_aisle', '{"category": "drinks"}', ARRAY['browse', 'buy']),
   ('shelf_supplies_harvey', 'Supplies Shelf', 'harvey_oak_aisle', '{"category": "supplies"}', ARRAY['browse', 'buy']),
   ('checkout_counter_harvey', 'Checkout Counter', 'harvey_oak_checkout', '{"register_open": true, "last_cleaned_at": null}', ARRAY['buy']),
-  ('delivery_crate_harvey', 'Delivery Crate', 'harvey_oak_checkout', '{"delivery_pending": false}', ARRAY['receive'])
+  ('delivery_crate_harvey', 'Delivery Crate', 'harvey_oak_checkout', '{"delivery_pending": false}', ARRAY['receive']),
+  ('delivery_crate_hobbs', 'Delivery Crate', 'hobbs_cafe_kitchen', '{"delivery_pending": false}', ARRAY['receive'])
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     location_id = EXCLUDED.location_id,
@@ -44,7 +45,15 @@ VALUES
   ('backroom_deodorant_001', 'Deodorant', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 300}', 4, 'hygiene', 15, NULL),
   ('backroom_perfume_001', 'Perfume', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 800}', 3, 'appearance', 20, NULL),
   ('backroom_cologne_001', 'Cologne', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 800}', 3, 'appearance', 20, NULL),
-  ('backroom_makeup_001', 'Makeup Kit', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 1200}', 2, 'appearance', 25, NULL)
+  ('backroom_makeup_001', 'Makeup Kit', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 1200}', 2, 'appearance', 25, NULL),
+  -- Hobbs Cafe shelf items
+  ('hobbs_coffee_001', 'Fresh Coffee', NULL, 'hobbs_cafe_counter', '{}', 5, 'stamina', 25, 300),
+  ('hobbs_pastry_001', 'Butter Croissant', NULL, 'hobbs_cafe_counter', '{}', 4, 'food', 20, 250),
+  ('hobbs_tea_001', 'Herbal Tea', NULL, 'hobbs_cafe_counter', '{}', 3, 'water', 15, 200),
+  -- Hobbs Cafe backroom items
+  ('backroom_hobbs_coffee_001', 'Coffee Beans', NULL, 'hobbs_cafe_kitchen', '{"backroom": true, "restock_price": 300}', 5, 'stamina', 25, NULL),
+  ('backroom_hobbs_pastry_001', 'Croissant Dough', NULL, 'hobbs_cafe_kitchen', '{"backroom": true, "restock_price": 250}', 4, 'food', 20, NULL),
+  ('backroom_hobbs_tea_001', 'Tea Leaves', NULL, 'hobbs_cafe_kitchen', '{"backroom": true, "restock_price": 200}', 3, 'water', 15, NULL)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     held_by = EXCLUDED.held_by,

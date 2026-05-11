@@ -13,8 +13,8 @@ VALUES
     'Cafe Owner',
     'town',
     'Runs a cafe, serves customers, and anchors a social venue.',
-    '{\"typical_tasks\": [\"serve drinks\", \"manage stock\", \"chat with patrons\"], \"interfaces_with\": [\"shopkeeper\", \"writer\"], \"guardrails\": [\"Avoid inventing full restaurant simulation rules in seed-only contributions.\"], \"contributor_notes\": \"Good anchor for Hobbs Cafe content packs.\"}'::jsonb,
-    NULL, NULL, 60, FALSE, NULL, NULL
+    '{"typical_tasks": ["serve drinks", "manage stock", "chat with patrons"], "interfaces_with": ["shopkeeper", "writer"], "guardrails": ["Avoid inventing full restaurant simulation rules in seed-only contributions."], "contributor_notes": "Good anchor for Hobbs Cafe content packs."}'::jsonb,
+    'isabella_morgan', 0, 60, FALSE, 1
   ),
   (
     'professor',
