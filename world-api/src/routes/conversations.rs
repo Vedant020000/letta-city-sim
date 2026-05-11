@@ -186,12 +186,14 @@ pub async fn action_speak_to(
     let mut tx = state.pool().begin().await?;
 
     // Verify both agents are in the same location and target is not sleeping
-    let location_check = sqlx::query_as::<_, (String, String, String)>(
+    let location_check = sqlx::query_as::<_, (String, String, String, i16, i16)>(
         r#"
         SELECT
             a1.current_location_id,
             a1.name,
-            a2.state
+            a2.state,
+            a2.hygiene_level,
+            a2.appearance_level
         FROM agents a1
         JOIN agents a2 ON a2.id = $2 OR a2.letta_agent_id = $2
         WHERE (a1.id = $1 OR a1.letta_agent_id = $1)
@@ -215,6 +217,30 @@ pub async fn action_speak_to(
 
     let location_id = location_check.0;
     let sender_name = location_check.1;
+    let target_hygiene = location_check.3;
+    let target_appearance = location_check.4;
+
+    // Build a description of the target's appearance for context
+    let mut appearance_notes = Vec::new();
+    if target_hygiene < 20 {
+        appearance_notes.push("looks unkempt and could really use a wash");
+    } else if target_hygiene < 50 {
+        appearance_notes.push("looks a bit disheveled");
+    } else if target_hygiene > 80 {
+        appearance_notes.push("looks fresh and clean");
+    }
+    if target_appearance < 20 {
+        appearance_notes.push("looks very messy");
+    } else if target_appearance < 50 {
+        appearance_notes.push("looks a bit untidy");
+    } else if target_appearance > 80 {
+        appearance_notes.push("looks sharp and well-groomed");
+    }
+    let appearance_context = if appearance_notes.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", appearance_notes.join("; "))
+    };
 
     // Find existing 1:1 conversation between these two agents, or create one
     let conversation_id = find_or_create_1on1_conversation(&mut tx, &location_id, &agent_id, &target_id).await?;
@@ -259,6 +285,7 @@ pub async fn action_speak_to(
     Ok(Json(ApiResponse::from(serde_json::json!({
         "conversation_id": conversation_id,
         "message": "Message sent.",
+        "target_appearance": appearance_context.trim(),
     }))))
 }
 

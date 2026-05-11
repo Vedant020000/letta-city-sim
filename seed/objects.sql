@@ -30,9 +30,21 @@ VALUES
   ('water_bottle_001', 'Water Bottle', NULL, 'harvey_oak_aisle', '{}', 5, 'water', 30, 150),
   ('coffee_can_001', 'Coffee Can', NULL, 'harvey_oak_aisle', '{}', 3, 'stamina', 20, 400),
   ('energy_bar_001', 'Energy Bar', NULL, 'harvey_oak_aisle', '{}', 4, 'stamina', 25, 250),
+  ('soap_001', 'Soap Bar', NULL, 'harvey_oak_aisle', '{}', 5, 'hygiene', 30, 150),
+  ('shampoo_001', 'Shampoo', NULL, 'harvey_oak_aisle', '{}', 4, 'hygiene', 20, 200),
+  ('deodorant_001', 'Deodorant', NULL, 'harvey_oak_aisle', '{}', 4, 'hygiene', 15, 300),
+  ('perfume_001', 'Perfume', NULL, 'harvey_oak_aisle', '{}', 3, 'appearance', 20, 800),
+  ('cologne_001', 'Cologne', NULL, 'harvey_oak_aisle', '{}', 3, 'appearance', 20, 800),
+  ('makeup_001', 'Makeup Kit', NULL, 'harvey_oak_aisle', '{}', 2, 'appearance', 25, 1200),
   ('backroom_bread_001', 'Bread Loaf', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 150}', 5, 'food', 25, NULL),
   ('backroom_water_001', 'Water Bottle', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 150}', 5, 'water', 30, NULL),
-  ('backroom_apple_001', 'Apple', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 100}', 5, 'food', 15, NULL)
+  ('backroom_apple_001', 'Apple', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 100}', 5, 'food', 15, NULL),
+  ('backroom_soap_001', 'Soap Bar', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 150}', 5, 'hygiene', 30, NULL),
+  ('backroom_shampoo_001', 'Shampoo', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 200}', 4, 'hygiene', 20, NULL),
+  ('backroom_deodorant_001', 'Deodorant', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 300}', 4, 'hygiene', 15, NULL),
+  ('backroom_perfume_001', 'Perfume', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 800}', 3, 'appearance', 20, NULL),
+  ('backroom_cologne_001', 'Cologne', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 800}', 3, 'appearance', 20, NULL),
+  ('backroom_makeup_001', 'Makeup Kit', NULL, 'harvey_oak_checkout', '{"backroom": true, "restock_price": 1200}', 2, 'appearance', 25, NULL)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     held_by = EXCLUDED.held_by,

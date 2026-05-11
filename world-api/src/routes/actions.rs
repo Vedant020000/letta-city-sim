@@ -3222,100 +3222,6 @@ pub async fn action_groom(
     })))
 }
 
-pub async fn action_apply_perfume(
-    State(state): State<AppState>,
-    AgentId(agent_id): AgentId,
-) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
-    let mut tx = state.pool().begin().await?;
-    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
-
-    // Find perfume/cologne in inventory
-    let item = sqlx::query_as::<_, (String, i16, Option<String>, Option<i16>)>(
-        r#"SELECT id, quantity, consumable_type, vital_value FROM inventory_items
-        WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
-          AND (name ILIKE '%perfume%' OR name ILIKE '%cologne%')
-        LIMIT 1"#,
-    )
-    .bind(&agent_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or(AppError::BadRequest("no perfume or cologne in your inventory".to_string()))?;
-
-    let vital_boost = item.3.unwrap_or(20) as i16;
-    let new_appearance = (agent.appearance_level + vital_boost).min(100);
-
-    // Decrement item
-    if item.1 <= 1 {
-        sqlx::query(r#"DELETE FROM inventory_items WHERE id = $1"#)
-            .bind(&item.0).execute(&mut *tx).await?;
-    } else {
-        sqlx::query(r#"UPDATE inventory_items SET quantity = quantity - 1 WHERE id = $1"#)
-            .bind(&item.0).execute(&mut *tx).await?;
-    }
-
-    sqlx::query(
-        r#"UPDATE agents SET appearance_level = $1, updated_at = NOW() WHERE id = $2"#,
-    )
-    .bind(new_appearance).bind(&agent_id)
-    .execute(&mut *tx).await?;
-
-    tx.commit().await?;
-
-    Ok(Json(ApiResponse::from(HygieneActionResponse {
-        hygiene_level: agent.hygiene_level,
-        appearance_level: new_appearance,
-        stamina_level: agent.stamina_level,
-        message: "You apply perfume. You smell wonderful!".to_string(),
-    })))
-}
-
-pub async fn action_apply_makeup(
-    State(state): State<AppState>,
-    AgentId(agent_id): AgentId,
-) -> AppResult<Json<ApiResponse<HygieneActionResponse>>> {
-    let mut tx = state.pool().begin().await?;
-    let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
-
-    // Find makeup in inventory
-    let item = sqlx::query_as::<_, (String, i16, Option<String>, Option<i16>)>(
-        r#"SELECT id, quantity, consumable_type, vital_value FROM inventory_items
-        WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
-          AND name ILIKE '%makeup%'
-        LIMIT 1"#,
-    )
-    .bind(&agent_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or(AppError::BadRequest("no makeup in your inventory".to_string()))?;
-
-    let vital_boost = item.3.unwrap_or(25) as i16;
-    let new_appearance = (agent.appearance_level + vital_boost).min(100);
-
-    // Decrement item
-    if item.1 <= 1 {
-        sqlx::query(r#"DELETE FROM inventory_items WHERE id = $1"#)
-            .bind(&item.0).execute(&mut *tx).await?;
-    } else {
-        sqlx::query(r#"UPDATE inventory_items SET quantity = quantity - 1 WHERE id = $1"#)
-            .bind(&item.0).execute(&mut *tx).await?;
-    }
-
-    sqlx::query(
-        r#"UPDATE agents SET appearance_level = $1, updated_at = NOW() WHERE id = $2"#,
-    )
-    .bind(new_appearance).bind(&agent_id)
-    .execute(&mut *tx).await?;
-
-    tx.commit().await?;
-
-    Ok(Json(ApiResponse::from(HygieneActionResponse {
-        hygiene_level: agent.hygiene_level,
-        appearance_level: new_appearance,
-        stamina_level: agent.stamina_level,
-        message: "You apply makeup. Looking gorgeous!".to_string(),
-    })))
-}
-
 pub async fn action_set_intention(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
@@ -3777,36 +3683,6 @@ pub async fn get_tool_manifest(
         tools.push(tool_swim());
     }
 
-    // Has perfume/makeup in inventory → apply tools
-    let has_perfume = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(
-            SELECT 1 FROM inventory_items
-            WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
-              AND (name ILIKE '%perfume%' OR name ILIKE '%cologne%')
-        )"#,
-    )
-    .bind(&agent_row.0)
-    .fetch_one(state.pool())
-    .await?;
-
-    if has_perfume {
-        tools.push(tool_apply_perfume());
-    }
-
-    let has_makeup = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(
-            SELECT 1 FROM inventory_items
-            WHERE held_by = $1 AND consumable_type = 'appearance' AND quantity > 0
-              AND name ILIKE '%makeup%'
-        )"#,
-    )
-    .bind(&agent_row.0)
-    .fetch_one(state.pool())
-    .await?;
-
-    if has_makeup {
-        tools.push(tool_apply_makeup());
-    }
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
         agent_id: agent_row.0,
@@ -4822,25 +4698,6 @@ fn tool_groom() -> WorldToolDefinition {
     }
 }
 
-fn tool_apply_perfume() -> WorldToolDefinition {
-    WorldToolDefinition {
-        name: "apply_perfume".to_string(),
-        description: "Apply perfume or cologne from your inventory. Boosts appearance +20. Others will notice the scent.".to_string(),
-        endpoint: "/actions/apply_perfume".to_string(),
-        method: "POST".to_string(),
-        parameters: json!({"type": "object", "properties": {}, "required": []}),
-    }
-}
-
-fn tool_apply_makeup() -> WorldToolDefinition {
-    WorldToolDefinition {
-        name: "apply_makeup".to_string(),
-        description: "Apply makeup from your inventory. Boosts appearance +25. Looking your best!".to_string(),
-        endpoint: "/actions/apply_makeup".to_string(),
-        method: "POST".to_string(),
-        parameters: json!({"type": "object", "properties": {}, "required": []}),
-    }
-}
 
 fn tool_set_intention() -> WorldToolDefinition {
     WorldToolDefinition {
