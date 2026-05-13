@@ -41,6 +41,11 @@ use routes::actions::{
     action_send_message, action_set_activity, action_set_intention, action_sleep,
     action_speak_to, action_transfer_item, action_use_item, action_wake_up, get_tool_manifest,
 };
+use routes::banking::{
+    action_check_bank_account, action_check_bank_balance_sheet, action_check_bank_rates,
+    action_deposit_money, action_repay_loan, action_set_bank_rates, action_take_loan,
+    action_withdraw_money,
+};
 use routes::agents::{
     agent_health_check, clear_agent_activity, get_agent_by_id, list_agents, move_agent_with_header,
     update_agent_activity, update_agent_location,
@@ -130,6 +135,14 @@ async fn main() -> AppResult<()> {
         .route("/actions/request_money", post(action_request_money))
         .route("/actions/respond_money_request", post(action_respond_money_request))
         .route("/actions/get_transaction_log", post(action_get_transaction_log))
+        .route("/actions/check_bank_rates", post(action_check_bank_rates))
+        .route("/actions/check_bank_account", post(action_check_bank_account))
+        .route("/actions/deposit_money", post(action_deposit_money))
+        .route("/actions/withdraw_money", post(action_withdraw_money))
+        .route("/actions/take_loan", post(action_take_loan))
+        .route("/actions/repay_loan", post(action_repay_loan))
+        .route("/actions/set_bank_rates", post(action_set_bank_rates))
+        .route("/actions/check_bank_balance_sheet", post(action_check_bank_balance_sheet))
         .route("/actions/check_vitals", post(action_check_vitals))
         .route("/actions/buy_item", post(action_buy_item))
         .route("/actions/check_shelf_stock", post(action_check_shelf_stock))

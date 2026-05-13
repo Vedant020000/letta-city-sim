@@ -124,6 +124,34 @@ VALUES
     'placeholder_city_treasury',
     NULL,
     'notice_board'
+  ),
+  (
+    'bank_treasury',
+    'Bank Treasury',
+    'Bank Treasury',
+    'Ledger entity for Smallville Bank capital, reserves, and bank payroll.',
+    'smallville_bank_vault',
+    'idle',
+    NULL,
+    TRUE,
+    TRUE,
+    'placeholder_bank_treasury',
+    NULL,
+    'smallville_bank_vault'
+  ),
+  (
+    'nora_patel',
+    'Nora Patel',
+    'Banker',
+    'Runs Smallville Bank with a careful eye on rates, reserves, and who needs credit.',
+    'smallville_bank_office',
+    'working',
+    'Reviewing the town bank ledger',
+    TRUE,
+    TRUE,
+    'placeholder_nora_patel',
+    NULL,
+    'smallville_bank_office'
   )
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,

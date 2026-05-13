@@ -6,7 +6,8 @@ VALUES
   ('maria_lopez', 'artist', TRUE, 'Starter assignment seeded from the existing occupation/persona.', 'active'),
   ('sam_moore', 'shop_assistant', TRUE, 'Starter assignment seeded from the existing occupation/persona.', 'active'),
   ('abigail_chen', 'student', TRUE, 'Starter assignment seeded from the existing occupation/persona.', 'active'),
-  ('rosie_kim', 'shopkeeper', TRUE, 'Starter assignment seeded from the existing occupation/persona.', 'active')
+  ('rosie_kim', 'shopkeeper', TRUE, 'Starter assignment seeded from the existing occupation/persona.', 'active'),
+  ('nora_patel', 'banker', TRUE, 'Starter assignment seeded for the bank sector.', 'active')
 ON CONFLICT (agent_id, job_id) DO UPDATE
 SET is_primary = EXCLUDED.is_primary,
     notes = EXCLUDED.notes,

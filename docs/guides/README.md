@@ -13,6 +13,7 @@ These guides are the practical starting point for community contributors.
 - `adding-jobs.md` — add town jobs, meta roles, and seeded assignments safely
 - `adding-items-and-consumables.md` — add content packs for items and consumables
 - `economy-system.md` — jobs, wages, payroll, shopkeeper tools, and the economic loop
+- `bank-sector.md` — deposits, loans, banker-set rates, reserves, and bank ledger
 - `civic-system.md` — mayor, elections, civic board, townhall, and city employment caps
 - `hygiene-system.md` — hygiene/appearance vitals, morning routines, bathing, consumables, social perception
 - `agent-auth.md` — local admin auth vs hosted bearer-token auth for agents

@@ -18,10 +18,13 @@ VALUES
   ('smallville_library_archive', 'Smallville Library Archive', 'A compact archive room of town records, old newspapers, maps, and local-history boxes.', 896, 288),
   ('miller_community_garden', 'Miller Community Garden', 'A small shared garden with vegetable beds, flower rows, and a tool shed near the park path.', 736, 480),
   ('riverside_clinic_lobby', 'Riverside Clinic Lobby', 'A modest neighborhood clinic lobby with a check-in desk, worn chairs, and health pamphlets.', 576, 448),
-  ('townhall_mayor_office', "Mayor's Office", 'The mayor works here. A large desk, town records, and a gavel.', 640, 320),
+  ('townhall_mayor_office', 'Mayor''s Office', 'The mayor works here. A large desk, town records, and a gavel.', 640, 320),
   ('townhall_assembly', 'Assembly Hall', 'A public meeting space with rows of chairs and a podium for debates.', 640, 288),
   ('townhall_civic_board', 'Civic Board Room', 'Complaints, hall of fame, ordinances, and official announcements are posted here.', 672, 304),
-  ('townhall_voting_booth', 'Voting Booth', 'A small booth where citizens cast their ballots for mayor.', 608, 304)
+  ('townhall_voting_booth', 'Voting Booth', 'A small booth where citizens cast their ballots for mayor.', 608, 304),
+  ('smallville_bank_lobby', 'Smallville Bank Lobby', 'A quiet bank lobby with teller windows, a posted rate board, and polished stone floors.', 416, 352),
+  ('smallville_bank_office', 'Smallville Bank Office', 'A private office where the banker reviews balances, rates, and loan requests.', 416, 320),
+  ('smallville_bank_vault', 'Smallville Bank Vault', 'A secured vault room holding the town bank reserves and ledgers.', 384, 320)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     description = EXCLUDED.description,

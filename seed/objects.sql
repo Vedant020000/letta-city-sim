@@ -12,7 +12,10 @@ VALUES
   ('shelf_supplies_harvey', 'Supplies Shelf', 'harvey_oak_aisle', '{"category": "supplies"}', ARRAY['browse', 'buy']),
   ('checkout_counter_harvey', 'Checkout Counter', 'harvey_oak_checkout', '{"register_open": true, "last_cleaned_at": null}', ARRAY['buy']),
   ('delivery_crate_harvey', 'Delivery Crate', 'harvey_oak_checkout', '{"delivery_pending": false}', ARRAY['receive']),
-  ('delivery_crate_hobbs', 'Delivery Crate', 'hobbs_cafe_kitchen', '{"delivery_pending": false}', ARRAY['receive'])
+  ('delivery_crate_hobbs', 'Delivery Crate', 'hobbs_cafe_kitchen', '{"delivery_pending": false}', ARRAY['receive']),
+  ('bank_teller_counter', 'Bank Teller Counter', 'smallville_bank_lobby', '{"open": true}', ARRAY['deposit', 'withdraw', 'loan']),
+  ('bank_rate_board', 'Bank Rate Board', 'smallville_bank_lobby', '{"posted": true}', ARRAY['read']),
+  ('bank_vault_door', 'Bank Vault Door', 'smallville_bank_vault', '{"locked": true}', ARRAY['inspect'])
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     location_id = EXCLUDED.location_id,
