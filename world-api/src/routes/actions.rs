@@ -3542,6 +3542,28 @@ pub async fn get_tool_manifest(
     .await?;
     let has_pending_money_requests = pending_money_requests.is_some();
 
+    // Bank tools — check_rates and check_account are universal;
+    // deposit/withdraw/take_loan/repay_loan only when at a bank location
+    let agent_location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
+    let at_bank = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM banks WHERE location_prefix = $1 AND is_active = TRUE)"#,
+    )
+    .bind(&agent_location_prefix)
+    .fetch_one(state.pool())
+    .await?;
+
+    // Banker tools — gate through banks.banker_job_id join (like shops.shopkeeper_job_id)
+    let is_banker = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj
+            JOIN banks b ON b.banker_job_id = aj.job_id
+            WHERE aj.agent_id = $1 AND aj.status = 'active'
+        )"#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
     let mut tools = vec![
         tool_set_activity(),
         tool_move_to(),
@@ -3556,12 +3578,22 @@ pub async fn get_tool_manifest(
         tool_pay_agent(),
         tool_request_money(),
         tool_get_transaction_log(),
+        tool_check_bank_rates(),
+        tool_check_bank_account(),
         tool_check_vitals(),
         tool_check_world_time(),
         tool_set_intention(),
         tool_complete_intention(),
         tool_get_intention(),
     ];
+
+    // Bank transaction tools — only when at a bank
+    if at_bank {
+        tools.push(tool_deposit_money());
+        tools.push(tool_withdraw_money());
+        tools.push(tool_take_loan());
+        tools.push(tool_repay_loan());
+    }
     if has_sleep {
         tools.push(tool_sleep());
     }
@@ -3588,9 +3620,13 @@ pub async fn get_tool_manifest(
     if has_pending_money_requests {
         tools.push(tool_respond_money_request());
     }
+    // Banker tools — only when at the bank
+    if is_banker && at_bank {
+        tools.push(tool_set_bank_rates());
+        tools.push(tool_check_bank_balance_sheet());
+    }
 
     // Check for priced items at current location (shop shelves) — only if shop is open
-    let location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
     let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let sim_hour = sim_time.hour() as i16;
 
@@ -3598,7 +3634,7 @@ pub async fn get_tool_manifest(
         r#"SELECT COALESCE(opens_at <= $1 AND closes_at > $1, true) FROM shops WHERE location_prefix = $2 AND is_active = TRUE"#,
     )
     .bind(sim_hour)
-    .bind(&location_prefix)
+    .bind(&agent_location_prefix)
     .fetch_optional(state.pool())
     .await?
     .unwrap_or(true); // default to open if not at a shop
@@ -3623,7 +3659,7 @@ pub async fn get_tool_manifest(
     let at_shop = sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS(SELECT 1 FROM shops WHERE location_prefix = $1 AND is_active = TRUE)"#,
     )
-    .bind(agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_"))
+    .bind(&agent_location_prefix)
     .fetch_one(state.pool())
     .await?;
 
@@ -4309,6 +4345,119 @@ fn tool_get_transaction_log() -> WorldToolDefinition {
             },
             "required": []
         }),
+    }
+}
+
+fn tool_check_bank_rates() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_bank_rates".to_string(),
+        description: "Learn the current bank deposit and loan rates, including approximate annualized rates.".to_string(),
+        endpoint: "/actions/check_bank_rates".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_check_bank_account() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_bank_account".to_string(),
+        description: "Check your cash, bank deposit balance, active loans, and accrued interest as of the current simulated time.".to_string(),
+        endpoint: "/actions/check_bank_account".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_deposit_money() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "deposit_money".to_string(),
+        description: "Move cash from your agent balance into your bank deposit account. Deposits earn the bank's daily deposit rate.".to_string(),
+        endpoint: "/actions/deposit_money".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "amount_cents": {"type": "integer", "description": "Amount in cents to deposit.", "minimum": 1}
+            },
+            "required": ["amount_cents"]
+        }),
+    }
+}
+
+fn tool_withdraw_money() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "withdraw_money".to_string(),
+        description: "Move money from your bank deposit account back to your cash balance.".to_string(),
+        endpoint: "/actions/withdraw_money".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "amount_cents": {"type": "integer", "description": "Amount in cents to withdraw.", "minimum": 1}
+            },
+            "required": ["amount_cents"]
+        }),
+    }
+}
+
+fn tool_take_loan() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "take_loan".to_string(),
+        description: "Borrow money from the bank. Loan principal is added to your cash balance and accrues interest at the current loan rate.".to_string(),
+        endpoint: "/actions/take_loan".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "amount_cents": {"type": "integer", "description": "Amount in cents to borrow.", "minimum": 1},
+                "purpose": {"type": "string", "description": "Optional reason for the loan."}
+            },
+            "required": ["amount_cents"]
+        }),
+    }
+}
+
+fn tool_repay_loan() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "repay_loan".to_string(),
+        description: "Repay part or all of an active bank loan from your cash balance.".to_string(),
+        endpoint: "/actions/repay_loan".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "loan_id": {"type": "string", "description": "The loan id to repay."},
+                "amount_cents": {"type": "integer", "description": "Amount in cents to repay.", "minimum": 1}
+            },
+            "required": ["loan_id", "amount_cents"]
+        }),
+    }
+}
+
+fn tool_set_bank_rates() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "set_bank_rates".to_string(),
+        description: "Banker-only. Set separate daily interest rates for deposits and loans.".to_string(),
+        endpoint: "/actions/set_bank_rates".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "deposit_rate_daily": {"type": "number", "description": "Daily deposit interest rate, e.g. 0.0005 for 0.05%."},
+                "loan_rate_daily": {"type": "number", "description": "Daily loan interest rate, e.g. 0.002 for 0.2%."}
+            },
+            "required": ["deposit_rate_daily", "loan_rate_daily"]
+        }),
+    }
+}
+
+fn tool_check_bank_balance_sheet() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_bank_balance_sheet".to_string(),
+        description: "Banker-only. Inspect bank cash, total deposits, outstanding loans, reserve requirement, and lendable funds.".to_string(),
+        endpoint: "/actions/check_bank_balance_sheet".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
     }
 }
 

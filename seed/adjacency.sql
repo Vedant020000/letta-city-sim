@@ -61,6 +61,15 @@ VALUES
   ('townhall_civic_board', 'notice_board', 20),
   ('notice_board', 'townhall_civic_board', 20),
   ('townhall_voting_booth', 'notice_board', 20),
-  ('notice_board', 'townhall_voting_booth', 20)
+  ('notice_board', 'townhall_voting_booth', 20),
+  -- Bank connections
+  ('notice_board', 'smallville_bank_lobby', 35),
+  ('smallville_bank_lobby', 'notice_board', 35),
+  ('smallville_bank_lobby', 'smallville_bank_office', 8),
+  ('smallville_bank_office', 'smallville_bank_lobby', 8),
+  ('smallville_bank_office', 'smallville_bank_vault', 6),
+  ('smallville_bank_vault', 'smallville_bank_office', 6),
+  ('smallville_bank_lobby', 'harvey_oak_entrance', 80),
+  ('harvey_oak_entrance', 'smallville_bank_lobby', 80)
 ON CONFLICT (from_id, to_id) DO UPDATE
 SET travel_secs = EXCLUDED.travel_secs;

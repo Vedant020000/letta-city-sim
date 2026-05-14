@@ -147,7 +147,7 @@ pub async fn update_world_time(
 
     sqlx::query(
         r#"INSERT INTO simulation_state (id, key, value) VALUES ('time_config', 'time', $1::jsonb)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()"#,
+        ON CONFLICT (id) DO UPDATE SET key = EXCLUDED.key, value = EXCLUDED.value, updated_at = NOW()"#,
     )
     .bind(config.to_string())
     .execute(state.pool())

@@ -69,6 +69,12 @@ apply_seeds() {
   apply_seed_file "$SEED_DIR/agents.sql"
   apply_seed_file "$SEED_DIR/jobs.sql"
   apply_seed_file "$SEED_DIR/agent_jobs.sql"
+  if [ -f "$SEED_DIR/shops.sql" ]; then
+    apply_seed_file "$SEED_DIR/shops.sql"
+  fi
+  if [ -f "$SEED_DIR/banks.sql" ]; then
+    apply_seed_file "$SEED_DIR/banks.sql"
+  fi
 }
 
 echo "Bootstrapping database..."

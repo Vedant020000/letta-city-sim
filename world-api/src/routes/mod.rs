@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod agents;
+pub mod banking;
 pub mod board;
 pub mod citizens;
 pub mod conversations;
