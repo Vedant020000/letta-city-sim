@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
@@ -11,24 +11,28 @@ use crate::state::AppState;
 
 const DEFAULT_BANK_ID: &str = "smallville_bank";
 const MAX_DAILY_RATE: f64 = 0.05;
-const MAX_AGENT_OUTSTANDING_LOANS_CENTS: i64 = 10_000;
+const MAX_AGENT_OUTSTANDING_LOANS_CENTS: i64 = 50_000;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct BankRow {
     id: String,
     name: String,
-    location_id: String,
+    location_prefix: String,
     balance_cents: i64,
+    banker_job_id: Option<String>,
     deposit_rate_daily: f64,
     loan_rate_daily: f64,
     reserve_ratio: f64,
+    opens_at: i16,
+    closes_at: i16,
 }
 
 #[derive(Debug, Serialize)]
 pub struct BankRatesResponse {
     pub bank_id: String,
     pub bank_name: String,
-    pub location_id: String,
+    pub open: bool,
+    pub hours: String,
     pub deposit_rate_daily: f64,
     pub loan_rate_daily: f64,
     pub deposit_apy_estimate: f64,
@@ -138,14 +142,27 @@ pub async fn action_check_bank_rates(
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<BankRatesResponse>>> {
     let bank = get_default_bank(state.pool()).await?;
-    Ok(Json(ApiResponse::from(bank_rates_response(bank))))
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
+    let sim_hour = sim_time.hour() as i16;
+    let open = bank.opens_at <= sim_hour && bank.closes_at > sim_hour;
+    Ok(Json(ApiResponse::from(BankRatesResponse {
+        bank_id: bank.id,
+        bank_name: bank.name,
+        open,
+        hours: format!("{}am - {}pm", bank.opens_at, if bank.closes_at > 12 { bank.closes_at - 12 } else { bank.closes_at }),
+        deposit_rate_daily: bank.deposit_rate_daily,
+        loan_rate_daily: bank.loan_rate_daily,
+        deposit_apy_estimate: (1.0 + bank.deposit_rate_daily).powf(365.0) - 1.0,
+        loan_apy_estimate: (1.0 + bank.loan_rate_daily).powf(365.0) - 1.0,
+        reserve_ratio: bank.reserve_ratio,
+    })))
 }
 
 pub async fn action_check_bank_account(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
 ) -> AppResult<Json<ApiResponse<BankAccountResponse>>> {
-    let sim_time = crate::routes::world::compute_sim_time(state.pool()).await.0;
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let mut tx = state.pool().begin().await?;
     let bank = get_default_bank_tx(&mut tx).await?;
     ensure_account_tx(&mut tx, &bank.id, &agent_id, sim_time).await?;
@@ -162,7 +179,7 @@ pub async fn action_deposit_money(
     Json(payload): Json<AmountRequest>,
 ) -> AppResult<Json<ApiResponse<BankTransferResponse>>> {
     validate_amount(payload.amount_cents)?;
-    let sim_time = crate::routes::world::compute_sim_time(state.pool()).await.0;
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let mut tx = state.pool().begin().await?;
     let bank = get_default_bank_tx(&mut tx).await?;
     ensure_account_tx(&mut tx, &bank.id, &agent_id, sim_time).await?;
@@ -223,7 +240,7 @@ pub async fn action_deposit_money(
         &mut tx,
         "bank.deposit",
         &agent_id,
-        &bank.location_id,
+        &bank.location_prefix,
         "Agent deposited money",
         json!({"amount_cents": payload.amount_cents, "bank_id": bank.id}),
     )
@@ -245,7 +262,7 @@ pub async fn action_withdraw_money(
     Json(payload): Json<AmountRequest>,
 ) -> AppResult<Json<ApiResponse<BankTransferResponse>>> {
     validate_amount(payload.amount_cents)?;
-    let sim_time = crate::routes::world::compute_sim_time(state.pool()).await.0;
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let mut tx = state.pool().begin().await?;
     let bank = get_default_bank_tx(&mut tx).await?;
     ensure_account_tx(&mut tx, &bank.id, &agent_id, sim_time).await?;
@@ -308,7 +325,7 @@ pub async fn action_withdraw_money(
         &mut tx,
         "bank.withdrawal",
         &agent_id,
-        &bank.location_id,
+        &bank.location_prefix,
         "Agent withdrew money",
         json!({"amount_cents": payload.amount_cents, "bank_id": bank.id}),
     )
@@ -330,11 +347,20 @@ pub async fn action_take_loan(
     Json(payload): Json<TakeLoanRequest>,
 ) -> AppResult<Json<ApiResponse<TakeLoanResponse>>> {
     validate_amount(payload.amount_cents)?;
-    let sim_time = crate::routes::world::compute_sim_time(state.pool()).await.0;
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let mut tx = state.pool().begin().await?;
-    let mut bank = get_default_bank_tx(&mut tx).await?;
-    accrue_bank_tx(&mut tx, &bank, sim_time).await?;
-    bank = get_default_bank_tx(&mut tx).await?;
+    let bank = get_default_bank_tx(&mut tx).await?;
+
+    // Check bank is open
+    let sim_hour = sim_time.hour() as i16;
+    if bank.opens_at > sim_hour || bank.closes_at <= sim_hour {
+        return Err(AppError::BadRequest("the bank is closed right now".to_string()));
+    }
+
+    // Accrue only this agent's accounts/loans (not everyone's)
+    ensure_account_tx(&mut tx, &bank.id, &agent_id, sim_time).await?;
+    accrue_account_tx(&mut tx, &bank, &agent_id, sim_time).await?;
+    accrue_agent_loans_tx(&mut tx, &bank.id, &agent_id, sim_time).await?;
 
     let outstanding = total_agent_outstanding_loans_tx(&mut tx, &bank.id, &agent_id).await?;
     if outstanding + payload.amount_cents > MAX_AGENT_OUTSTANDING_LOANS_CENTS {
@@ -410,7 +436,7 @@ pub async fn action_take_loan(
         &mut tx,
         "bank.loan_disbursement",
         &agent_id,
-        &bank.location_id,
+        &bank.location_prefix,
         "Agent took out a bank loan",
         json!({"amount_cents": payload.amount_cents, "loan_id": loan_id, "bank_id": bank.id}),
     )
@@ -434,7 +460,7 @@ pub async fn action_repay_loan(
     Json(payload): Json<RepayLoanRequest>,
 ) -> AppResult<Json<ApiResponse<RepayLoanResponse>>> {
     validate_amount(payload.amount_cents)?;
-    let sim_time = crate::routes::world::compute_sim_time(state.pool()).await.0;
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let mut tx = state.pool().begin().await?;
     let bank = get_default_bank_tx(&mut tx).await?;
     accrue_loan_tx(&mut tx, &bank.id, &payload.loan_id, sim_time).await?;
@@ -514,7 +540,7 @@ pub async fn action_repay_loan(
         &mut tx,
         "bank.loan_repayment",
         &agent_id,
-        &bank.location_id,
+        &bank.location_prefix,
         "Agent repaid a bank loan",
         json!({"amount_cents": amount_applied, "loan_id": payload.loan_id, "bank_id": bank.id}),
     )
@@ -538,10 +564,11 @@ pub async fn action_set_bank_rates(
     Json(payload): Json<SetBankRatesRequest>,
 ) -> AppResult<Json<ApiResponse<SetBankRatesResponse>>> {
     validate_rates(payload.deposit_rate_daily, payload.loan_rate_daily)?;
-    let sim_time = crate::routes::world::compute_sim_time(state.pool()).await.0;
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let mut tx = state.pool().begin().await?;
     ensure_banker_tx(&mut tx, &agent_id).await?;
     let bank = get_default_bank_tx(&mut tx).await?;
+    // Full accrual for rate changes (affects all accounts)
     accrue_bank_tx(&mut tx, &bank, sim_time).await?;
 
     sqlx::query(
@@ -562,7 +589,7 @@ pub async fn action_set_bank_rates(
     .await?;
 
     insert_ledger_tx(&mut tx, &bank.id, &agent_id, None, "rate_change", 0, json!({"deposit_rate_daily": payload.deposit_rate_daily, "loan_rate_daily": payload.loan_rate_daily})).await?;
-    insert_bank_event_tx(&mut tx, "bank.rate_change", &agent_id, &bank.location_id, "Banker updated bank rates", json!({"bank_id": bank.id, "deposit_rate_daily": payload.deposit_rate_daily, "loan_rate_daily": payload.loan_rate_daily})).await?;
+    insert_bank_event_tx(&mut tx, "bank.rate_change", &agent_id, &bank.location_prefix, "Banker updated bank rates", json!({"bank_id": bank.id, "deposit_rate_daily": payload.deposit_rate_daily, "loan_rate_daily": payload.loan_rate_daily})).await?;
     tx.commit().await?;
 
     Ok(Json(ApiResponse::from(SetBankRatesResponse {
@@ -577,7 +604,7 @@ pub async fn action_check_bank_balance_sheet(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
 ) -> AppResult<Json<ApiResponse<BalanceSheetResponse>>> {
-    let sim_time = crate::routes::world::compute_sim_time(state.pool()).await.0;
+    let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let mut tx = state.pool().begin().await?;
     ensure_banker_tx(&mut tx, &agent_id).await?;
     let mut bank = get_default_bank_tx(&mut tx).await?;
@@ -620,23 +647,10 @@ fn validate_rates(deposit_rate_daily: f64, loan_rate_daily: f64) -> AppResult<()
     Ok(())
 }
 
-fn bank_rates_response(bank: BankRow) -> BankRatesResponse {
-    BankRatesResponse {
-        bank_id: bank.id,
-        bank_name: bank.name,
-        location_id: bank.location_id,
-        deposit_rate_daily: bank.deposit_rate_daily,
-        loan_rate_daily: bank.loan_rate_daily,
-        deposit_apy_estimate: (1.0 + bank.deposit_rate_daily).powf(365.0) - 1.0,
-        loan_apy_estimate: (1.0 + bank.loan_rate_daily).powf(365.0) - 1.0,
-        reserve_ratio: bank.reserve_ratio,
-    }
-}
-
 async fn get_default_bank(pool: &sqlx::PgPool) -> AppResult<BankRow> {
     sqlx::query_as::<_, BankRow>(
         r#"
-        SELECT id, name, location_id, balance_cents, deposit_rate_daily, loan_rate_daily, reserve_ratio
+        SELECT id, name, location_prefix, balance_cents, banker_job_id, deposit_rate_daily, loan_rate_daily, reserve_ratio, opens_at, closes_at
         FROM banks
         WHERE id = $1
         "#,
@@ -650,7 +664,7 @@ async fn get_default_bank(pool: &sqlx::PgPool) -> AppResult<BankRow> {
 async fn get_default_bank_tx(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> AppResult<BankRow> {
     sqlx::query_as::<_, BankRow>(
         r#"
-        SELECT id, name, location_id, balance_cents, deposit_rate_daily, loan_rate_daily, reserve_ratio
+        SELECT id, name, location_prefix, balance_cents, banker_job_id, deposit_rate_daily, loan_rate_daily, reserve_ratio, opens_at, closes_at
         FROM banks
         WHERE id = $1
         FOR UPDATE
@@ -978,9 +992,14 @@ async fn ensure_banker_tx(
     agent_id: &str,
 ) -> AppResult<()> {
     let is_banker = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM agent_jobs WHERE agent_id = $1 AND job_id = 'banker' AND status = 'active')",
+        r#"SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj
+            JOIN banks b ON b.banker_job_id = aj.job_id
+            WHERE aj.agent_id = $1 AND aj.status = 'active' AND b.id = $2
+        )"#,
     )
     .bind(agent_id)
+    .bind(DEFAULT_BANK_ID)
     .fetch_one(&mut **tx)
     .await?;
 

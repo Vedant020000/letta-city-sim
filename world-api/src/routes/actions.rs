@@ -3542,8 +3542,23 @@ pub async fn get_tool_manifest(
     .await?;
     let has_pending_money_requests = pending_money_requests.is_some();
 
+    // Bank tools — check_rates and check_account are universal;
+    // deposit/withdraw/take_loan/repay_loan only when at a bank location
+    let agent_location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
+    let at_bank = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM banks WHERE location_prefix = $1 AND is_active = TRUE)"#,
+    )
+    .bind(&agent_location_prefix)
+    .fetch_one(state.pool())
+    .await?;
+
+    // Banker tools — gate through banks.banker_job_id join (like shops.shopkeeper_job_id)
     let is_banker = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(SELECT 1 FROM agent_jobs WHERE agent_id = $1 AND job_id = 'banker' AND status = 'active')"#,
+        r#"SELECT EXISTS(
+            SELECT 1 FROM agent_jobs aj
+            JOIN banks b ON b.banker_job_id = aj.job_id
+            WHERE aj.agent_id = $1 AND aj.status = 'active'
+        )"#,
     )
     .bind(&agent_row.0)
     .fetch_one(state.pool())
@@ -3565,16 +3580,20 @@ pub async fn get_tool_manifest(
         tool_get_transaction_log(),
         tool_check_bank_rates(),
         tool_check_bank_account(),
-        tool_deposit_money(),
-        tool_withdraw_money(),
-        tool_take_loan(),
-        tool_repay_loan(),
         tool_check_vitals(),
         tool_check_world_time(),
         tool_set_intention(),
         tool_complete_intention(),
         tool_get_intention(),
     ];
+
+    // Bank transaction tools — only when at a bank
+    if at_bank {
+        tools.push(tool_deposit_money());
+        tools.push(tool_withdraw_money());
+        tools.push(tool_take_loan());
+        tools.push(tool_repay_loan());
+    }
     if has_sleep {
         tools.push(tool_sleep());
     }
@@ -3601,13 +3620,13 @@ pub async fn get_tool_manifest(
     if has_pending_money_requests {
         tools.push(tool_respond_money_request());
     }
-    if is_banker {
+    // Banker tools — only when at the bank
+    if is_banker && at_bank {
         tools.push(tool_set_bank_rates());
         tools.push(tool_check_bank_balance_sheet());
     }
 
     // Check for priced items at current location (shop shelves) — only if shop is open
-    let location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
     let (sim_time, _, _, _) = crate::routes::world::compute_sim_time(state.pool()).await;
     let sim_hour = sim_time.hour() as i16;
 
@@ -3615,7 +3634,7 @@ pub async fn get_tool_manifest(
         r#"SELECT COALESCE(opens_at <= $1 AND closes_at > $1, true) FROM shops WHERE location_prefix = $2 AND is_active = TRUE"#,
     )
     .bind(sim_hour)
-    .bind(&location_prefix)
+    .bind(&agent_location_prefix)
     .fetch_optional(state.pool())
     .await?
     .unwrap_or(true); // default to open if not at a shop
@@ -3640,7 +3659,7 @@ pub async fn get_tool_manifest(
     let at_shop = sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS(SELECT 1 FROM shops WHERE location_prefix = $1 AND is_active = TRUE)"#,
     )
-    .bind(agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_"))
+    .bind(&agent_location_prefix)
     .fetch_one(state.pool())
     .await?;
 
