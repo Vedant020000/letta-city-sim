@@ -15,8 +15,9 @@ const HEADER_AGENT_ID: &str = "x-agent-id";
 const AGENT_TOKEN_PREFIX: &str = "lcity_agent_";
 
 #[derive(Clone, Debug)]
-pub struct SimKey(pub String);
+pub struct SimKey(#[allow(dead_code)] pub String);
 
+#[allow(dead_code)]
 impl SimKey {
     pub fn as_str(&self) -> &str {
         &self.0
@@ -26,6 +27,7 @@ impl SimKey {
 #[derive(Clone, Debug)]
 pub struct AgentId(pub String);
 
+#[allow(dead_code)]
 impl AgentId {
     pub fn into_inner(self) -> String {
         self.0

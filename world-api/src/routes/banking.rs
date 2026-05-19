@@ -14,6 +14,7 @@ const MAX_DAILY_RATE: f64 = 0.05;
 const MAX_AGENT_OUTSTANDING_LOANS_CENTS: i64 = 50_000;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
+#[allow(dead_code)]
 struct BankRow {
     id: String,
     name: String,

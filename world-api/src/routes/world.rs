@@ -88,7 +88,7 @@ pub fn day_number_from_sim_time(sim_time: &DateTime<Utc>, epoch_start: Option<&D
 }
 
 pub async fn get_world_time(State(state): State<AppState>) -> AppResult<Json<WorldTimeResponse>> {
-    let (sim_time, time_scale, paused, epoch) = compute_sim_time(state.pool()).await;
+    let (sim_time, _time_scale, paused, epoch) = compute_sim_time(state.pool()).await;
 
     // Also check simulation_paused from world state
     let world_paused = sqlx::query_scalar::<_, bool>(

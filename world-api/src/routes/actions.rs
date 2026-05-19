@@ -1361,7 +1361,7 @@ pub async fn action_clean_shop(
 
     // Update the checkout counter's last_cleaned_at
     let prefix = agent.current_location_id.split('_').take(2).collect::<Vec<_>>().join("_");
-    let counter_id = format!("{}_counter_{}", prefix, prefix.split('_').last().unwrap_or("harvey"));
+    let _counter_id = format!("{}_counter_{}", prefix, prefix.split('_').last().unwrap_or("harvey"));
 
     // Try to find the counter object at this shop
     let now_str = Utc::now().to_rfc3339();
@@ -1486,7 +1486,7 @@ pub async fn action_browse_shop(
 
 pub async fn action_list_job_openings(
     State(state): State<AppState>,
-    AgentId(agent_id): AgentId,
+    AgentId(_agent_id): AgentId,
 ) -> AppResult<Json<ApiResponse<Vec<JobOpening>>>> {
     let rows = sqlx::query(
         r#"
@@ -2320,6 +2320,7 @@ pub async fn action_collect_city_wage(
 // ---------------------------------------------------------------------------
 
 // Helper: get current mayor agent id
+#[allow(dead_code)]
 async fn get_current_mayor(pool: &sqlx::PgPool) -> AppResult<String> {
     sqlx::query_scalar::<_, String>(
         r#"SELECT agent_id FROM mayor_terms WHERE is_current = TRUE LIMIT 1"#,
@@ -2363,7 +2364,7 @@ pub struct ReadCivicBoardRequest {
 
 pub async fn action_read_civic_board(
     State(state): State<AppState>,
-    AgentId(agent_id): AgentId,
+    AgentId(_agent_id): AgentId,
     Json(payload): Json<ReadCivicBoardRequest>,
 ) -> AppResult<Json<ApiResponse<Vec<CivicPost>>>> {
     let rows = if let Some(filter_type) = &payload.r#type {
@@ -3680,7 +3681,7 @@ pub async fn get_tool_manifest(
     .fetch_optional(state.pool())
     .await?;
 
-    if let Some((shop_id, shop_prefix)) = shop_info {
+    if let Some((_shop_id, shop_prefix)) = shop_info {
         let at_own_shop = agent_row.1.starts_with(&format!("{}_", shop_prefix));
 
         if at_own_shop {
@@ -4651,6 +4652,7 @@ fn tool_list_job_openings() -> WorldToolDefinition {
     }
 }
 
+#[allow(dead_code)]
 fn tool_apply_for_job() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "apply_for_job".to_string(),

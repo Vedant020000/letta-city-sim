@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use chrono::{Local, Timelike, Utc};
+use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -81,7 +81,7 @@ pub async fn get_town_pulse(
 }
 
 async fn load_world_time(state: &AppState) -> AppResult<WorldTimeResponse> {
-    let (sim_time, time_scale, paused, epoch) = crate::routes::world::compute_sim_time(state.pool()).await;
+    let (sim_time, _time_scale, paused, epoch) = crate::routes::world::compute_sim_time(state.pool()).await;
 
     let world_paused = sqlx::query_scalar::<_, bool>(
         r#"SELECT COALESCE((value->>'simulation_paused')::boolean, false) FROM simulation_state WHERE key = 'world' LIMIT 1"#,
