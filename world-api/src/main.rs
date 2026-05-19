@@ -68,7 +68,7 @@ use routes::inventory::{
 use routes::jobs::{
     get_job_by_id, list_agent_jobs, list_job_agents, list_jobs, remove_agent_job, upsert_agent_job,
 };
-use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
+use routes::locations::{action_check_location_roles, get_agent_locations, get_location_by_id, get_nearby_locations, list_locations};
 use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
 use routes::pulse::get_town_pulse;
@@ -188,6 +188,7 @@ async fn main() -> AppResult<()> {
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))
+        .route("/actions/check_location_roles", post(action_check_location_roles))
         .route("/conversations", get(list_active_conversations))
         .route("/conversations/:id", get(get_conversation_detail))
         .route("/locations/:id", get(get_location_by_id))
@@ -218,6 +219,7 @@ async fn main() -> AppResult<()> {
         .route("/jobs/:id/agents", get(list_job_agents))
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/tool-manifest", get(get_tool_manifest))
+        .route("/agents/:id/locations", get(get_agent_locations))
         .route("/agents/:id/intentions", get(list_agent_intentions))
         .route("/agents/:id/intentions", post(create_agent_intention))
         .route("/agents/:id/jobs", get(list_agent_jobs))

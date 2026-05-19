@@ -3,15 +3,21 @@ use axum::{
     extract::{Path, State},
 };
 
-use crate::error::AppError;
-use crate::error::AppResult;
-use crate::models::location::{AdjacentLocation, Location, LocationDetailResponse};
+use crate::auth::AgentId;
+use crate::error::{AppError, AppResult};
+use crate::models::common::ApiResponse;
+use crate::models::location::{
+    AdjacentLocation, AgentLocationRole, AgentLocationsResponse, Location, LocationDetailResponse,
+    LocationRole,
+};
 use crate::state::AppState;
+
+use serde_json::json;
 
 pub async fn list_locations(State(state): State<AppState>) -> AppResult<Json<Vec<Location>>> {
     let locations = sqlx::query_as::<_, Location>(
         r#"
-        SELECT id, name, description, map_x, map_y
+        SELECT id, name, description, map_x, map_y, kind, capacity
         FROM locations
         ORDER BY name
         "#,
@@ -28,7 +34,7 @@ pub async fn get_location_by_id(
 ) -> AppResult<Json<LocationDetailResponse>> {
     let location = sqlx::query_as::<_, Location>(
         r#"
-        SELECT id, name, description, map_x, map_y
+        SELECT id, name, description, map_x, map_y, kind, capacity
         FROM locations
         WHERE id = $1
         "#,
@@ -51,7 +57,20 @@ pub async fn get_location_by_id(
     .fetch_all(state.pool())
     .await?;
 
-    Ok(Json(LocationDetailResponse { location, nearby }))
+    let roles = sqlx::query_as::<_, LocationRole>(
+        r#"
+        SELECT lr.location_id, lr.agent_id, lr.role, a.name as agent_name, lr.created_at
+        FROM location_roles lr
+        JOIN agents a ON a.id = lr.agent_id
+        WHERE lr.location_id = $1
+        ORDER BY lr.role, a.name
+        "#,
+    )
+    .bind(&location_id)
+    .fetch_all(state.pool())
+    .await?;
+
+    Ok(Json(LocationDetailResponse { location, nearby, roles }))
 }
 
 pub async fn get_nearby_locations(
@@ -87,4 +106,70 @@ pub async fn get_nearby_locations(
     .await?;
 
     Ok(Json(nearby))
+}
+
+pub async fn get_agent_locations(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> AppResult<Json<AgentLocationsResponse>> {
+    let agent = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT id, home_location_id FROM agents WHERE id = $1"
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let roles = sqlx::query_as::<_, AgentLocationRole>(
+        r#"
+        SELECT lr.location_id, l.name as location_name, l.kind as location_kind, lr.role, lr.created_at
+        FROM location_roles lr
+        JOIN locations l ON l.id = lr.location_id
+        WHERE lr.agent_id = $1
+        ORDER BY lr.role, l.name
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_all(state.pool())
+    .await?;
+
+    Ok(Json(AgentLocationsResponse {
+        agent_id: agent.0,
+        home_location_id: agent.1,
+        roles,
+    }))
+}
+
+pub async fn action_check_location_roles(
+    State(state): State<AppState>,
+    AgentId(agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<serde_json::Value>>> {
+    let location_id: String = sqlx::query_scalar("SELECT current_location_id FROM agents WHERE id = $1")
+        .bind(&agent_id)
+        .fetch_one(state.pool())
+        .await?;
+
+    let roles = sqlx::query_as::<_, LocationRole>(
+        r#"
+        SELECT lr.location_id, lr.agent_id, lr.role, a.name as agent_name, lr.created_at
+        FROM location_roles lr
+        JOIN agents a ON a.id = lr.agent_id
+        WHERE lr.location_id = $1
+        ORDER BY lr.role, a.name
+        "#,
+    )
+    .bind(&location_id)
+    .fetch_all(state.pool())
+    .await?;
+
+    let location_name: String = sqlx::query_scalar("SELECT name FROM locations WHERE id = $1")
+        .bind(&location_id)
+        .fetch_one(state.pool())
+        .await?;
+
+    Ok(Json(ApiResponse::from(json!({
+        "location_id": location_id,
+        "location_name": location_name,
+        "roles": roles,
+    }))))
 }

@@ -3582,6 +3582,7 @@ pub async fn get_tool_manifest(
         tool_check_bank_rates(),
         tool_check_bank_account(),
         tool_explain_bank_policy(),
+        tool_check_location_roles(),
         tool_check_vitals(),
         tool_check_world_time(),
         tool_set_intention(),
@@ -4490,6 +4491,16 @@ fn tool_explain_bank_policy() -> WorldToolDefinition {
         name: "explain_bank_policy".to_string(),
         description: "Read a concise explanation of how bank policy works: reserves, spreads, deposit vs loan rate tradeoffs, and the utilization ratio. Useful for any agent who wants to understand banking fundamentals.".to_string(),
         endpoint: "/actions/explain_bank_policy".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_check_location_roles() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_location_roles".to_string(),
+        description: "Check who has roles at your current location — residents, owners, workers, managers. Helps you understand who lives or works where you are.".to_string(),
+        endpoint: "/actions/check_location_roles".to_string(),
         method: "POST".to_string(),
         parameters: json!({"type": "object", "properties": {}, "required": []}),
     }
