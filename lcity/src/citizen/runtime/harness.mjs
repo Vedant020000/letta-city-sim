@@ -7,7 +7,7 @@ export async function runHarness(config, emit, signal) {
     apiBase: config.world.api_base.value,
     wsUrl: config.world.ws_url.value,
     mode: config.mode,
-    runtime: "letta_code_sdk",
+    runtime: `letta_code_sdk_${config.runtime.wake_transport.value}`,
   });
 
   await runWakeLoop(config, emit, signal);

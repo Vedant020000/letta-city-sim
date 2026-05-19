@@ -53,7 +53,10 @@ use routes::agents::{
 use routes::board::{
     clear_board, create_board_post, delete_board_post, get_board_posts, get_public_board,
 };
-use routes::citizens::{citizen_action, close_citizen_wake, create_test_citizen_wake, ws_citizen};
+use routes::citizens::{
+    citizen_action, claim_citizen_wake, close_citizen_wake, create_test_citizen_wake,
+    respond_citizen_wake, ws_citizen,
+};
 use routes::economy::update_economy;
 use routes::events::{create_event, list_events};
 use routes::intentions::{
@@ -112,6 +115,8 @@ async fn main() -> AppResult<()> {
         .route("/locations", get(list_locations))
         .route("/world/time", get(get_world_time).patch(update_world_time))
         .route("/v1/citizen/action", post(citizen_action))
+        .route("/v1/citizen/wakes/claim", post(claim_citizen_wake))
+        .route("/v1/citizen/wakes/:wake_event_id/respond", post(respond_citizen_wake))
         .route("/actions/set_activity", post(action_set_activity))
         .route("/actions/move_to", post(action_move_to))
         .route("/actions/board_post", post(action_board_post))

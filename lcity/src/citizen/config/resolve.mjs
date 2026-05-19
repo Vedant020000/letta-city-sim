@@ -384,6 +384,8 @@ export function resolveRuntimeConfig({ flags = {}, cwd = process.cwd() } = {}) {
     },
     runtime: {
       max_wake_iterations: resolvedNumber({ flagValue: flags.maxWakeIterations, envName: "LCITY_CITIZEN_MAX_WAKE_ITERATIONS", profileValue: profileData.runtime?.max_wake_iterations, defaultValue: DEFAULTS.runtime.max_wake_iterations, label: "runtime.max_wake_iterations" }),
+      wake_transport: resolvedString({ flagValue: flags.wakeTransport, envName: "LCITY_CITIZEN_WAKE_TRANSPORT", profileValue: profileData.runtime?.wake_transport, filePath: "", defaultValue: DEFAULTS.runtime.wake_transport, label: "runtime.wake_transport", cwd }),
+      claim_wait_ms: resolvedNumber({ flagValue: flags.claimWaitMs, envName: "LCITY_CITIZEN_CLAIM_WAIT_MS", profileValue: profileData.runtime?.claim_wait_ms, defaultValue: DEFAULTS.runtime.claim_wait_ms, label: "runtime.claim_wait_ms" }),
       reconnect_initial_ms: resolvedNumber({ flagValue: flags.reconnectInitialMs, envName: "LCITY_CITIZEN_RECONNECT_INITIAL_MS", profileValue: profileData.runtime?.reconnect_initial_ms, defaultValue: DEFAULTS.runtime.reconnect_initial_ms, label: "runtime.reconnect_initial_ms" }),
       reconnect_max_ms: resolvedNumber({ flagValue: flags.reconnectMaxMs, envName: "LCITY_CITIZEN_RECONNECT_MAX_MS", profileValue: profileData.runtime?.reconnect_max_ms, defaultValue: DEFAULTS.runtime.reconnect_max_ms, label: "runtime.reconnect_max_ms" }),
       recent_wake_cache_size: resolvedNumber({ flagValue: flags.recentWakeCacheSize, envName: "LCITY_CITIZEN_RECENT_WAKE_CACHE_SIZE", profileValue: profileData.runtime?.recent_wake_cache_size, defaultValue: DEFAULTS.runtime.recent_wake_cache_size, label: "runtime.recent_wake_cache_size" }),
@@ -421,6 +423,7 @@ export function configOverview(resolved) {
     { label: "Letta base", value: resolved.letta.base_url.value, source: resolved.letta.base_url.source },
     { label: "Letta key", value: resolved.letta.api_key.present ? "present" : "missing", source: resolved.letta.api_key.source },
     { label: "Letta agent", value: resolved.letta.agent_id.value || "missing", source: resolved.letta.agent_id.source },
+    { label: "Wake transport", value: resolved.runtime.wake_transport.value, source: resolved.runtime.wake_transport.source },
     { label: "Wake cap", value: String(resolved.runtime.max_wake_iterations.value), source: resolved.runtime.max_wake_iterations.source },
     { label: "Display", value: resolved.ui.display_mode.value, source: resolved.ui.display_mode.source },
   ];

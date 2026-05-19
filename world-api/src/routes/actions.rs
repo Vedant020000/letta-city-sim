@@ -3546,7 +3546,7 @@ pub async fn get_tool_manifest(
     // deposit/withdraw/take_loan/repay_loan only when at a bank location
     let agent_location_prefix = agent_row.1.split('_').take(2).collect::<Vec<_>>().join("_");
     let at_bank = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(SELECT 1 FROM banks WHERE location_prefix = $1 AND is_active = TRUE)"#,
+        r#"SELECT EXISTS(SELECT 1 FROM banks WHERE location_prefix = $1)"#,
     )
     .bind(&agent_location_prefix)
     .fetch_one(state.pool())

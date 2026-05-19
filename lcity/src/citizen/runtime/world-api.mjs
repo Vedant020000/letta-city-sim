@@ -122,6 +122,47 @@ export async function invokeWorldTool(config, toolDefinition, args) {
   return normalizeApiResponse(response);
 }
 
+export async function claimCitizenWake(config) {
+  const apiBase = normalizeApiBase(config.world.api_base.value);
+  const waitMs = config.runtime.claim_wait_ms?.value ?? 25000;
+  const response = await requestJson(`${apiBase}/v1/citizen/wakes/claim?wait_ms=${encodeURIComponent(waitMs)}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.world.auth.bearer_token.value}`,
+      "x-agent-id": config.world.auth.city_agent_id.value,
+      "x-runner-id": `lcity-${process.pid}`,
+    },
+  });
+
+  return {
+    ok: response.ok,
+    status_code: response.status,
+    wake: response.payload,
+  };
+}
+
+export async function respondCitizenWake(config, wake, status, reason = "") {
+  const apiBase = normalizeApiBase(config.world.api_base.value);
+  const response = await requestJson(`${apiBase}/v1/citizen/wakes/${encodeURIComponent(wake.event_id)}/respond`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.world.auth.bearer_token.value}`,
+      "x-agent-id": config.world.auth.city_agent_id.value,
+      "x-wake-token": wake.wake_token,
+    },
+    body: {
+      status,
+      ...(reason ? { reason } : {}),
+    },
+  });
+
+  return {
+    ok: response.ok,
+    status_code: response.status,
+    body: response.payload,
+  };
+}
+
 export async function invokeCitizenLifecycle(config, wake, action, args = {}) {
   const apiBase = normalizeApiBase(config.world.api_base.value);
   const response = await requestJson(`${apiBase}/v1/citizen/action`, {
