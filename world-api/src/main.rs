@@ -43,6 +43,7 @@ use routes::actions::{
 };
 use routes::banking::{
     action_check_bank_account, action_check_bank_balance_sheet, action_check_bank_rates,
+    action_check_bank_trends, action_check_rate_policy_context, action_explain_bank_policy,
     action_deposit_money, action_repay_loan, action_set_bank_rates, action_take_loan,
     action_withdraw_money,
 };
@@ -143,6 +144,9 @@ async fn main() -> AppResult<()> {
         .route("/actions/repay_loan", post(action_repay_loan))
         .route("/actions/set_bank_rates", post(action_set_bank_rates))
         .route("/actions/check_bank_balance_sheet", post(action_check_bank_balance_sheet))
+        .route("/actions/check_bank_trends", post(action_check_bank_trends))
+        .route("/actions/check_rate_policy_context", post(action_check_rate_policy_context))
+        .route("/actions/explain_bank_policy", post(action_explain_bank_policy))
         .route("/actions/check_vitals", post(action_check_vitals))
         .route("/actions/buy_item", post(action_buy_item))
         .route("/actions/check_shelf_stock", post(action_check_shelf_stock))

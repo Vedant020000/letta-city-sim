@@ -138,6 +138,41 @@ pub struct BalanceSheetResponse {
     pub reserve_ratio: f64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct BankTrendsResponse {
+    pub bank_id: String,
+    pub as_of: String,
+    pub deposits_today_cents: i64,
+    pub withdrawals_today_cents: i64,
+    pub loans_issued_today_cents: i64,
+    pub repayments_today_cents: i64,
+    pub interest_paid_today_cents: i64,
+    pub total_deposits_cents: i64,
+    pub total_active_loans_cents: i64,
+    pub utilization_ratio: f64,
+    pub reserve_buffer_cents: i64,
+    pub agents_with_active_loans: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RatePolicyContextResponse {
+    pub bank_id: String,
+    pub current_spread: f64,
+    pub deposit_rate_daily: f64,
+    pub loan_rate_daily: f64,
+    pub lendable_funds_status: String,
+    pub deposit_growth_status: String,
+    pub loan_growth_status: String,
+    pub suggested_safe_spread: String,
+    pub suggested_deposit_rate_range: String,
+    pub suggested_loan_rate_range: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExplainBankPolicyResponse {
+    pub explanation: String,
+}
+
 pub async fn action_check_bank_rates(
     State(state): State<AppState>,
 ) -> AppResult<Json<ApiResponse<BankRatesResponse>>> {
@@ -613,6 +648,201 @@ pub async fn action_check_bank_balance_sheet(
     let response = balance_sheet_tx(&mut tx, &bank).await?;
     tx.commit().await?;
     Ok(Json(ApiResponse::from(response)))
+}
+
+pub async fn action_check_bank_trends(
+    State(state): State<AppState>,
+    AgentId(_agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<BankTrendsResponse>>> {
+    let bank = get_default_bank(state.pool()).await?;
+    let today = Utc::now().date_naive();
+
+    let deposits_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'deposit' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let withdrawals_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'withdrawal' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let loans_issued_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'loan_disbursement' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let repayments_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'loan_repayment' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let interest_paid_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type IN ('deposit_interest', 'loan_interest') AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let total_deposits: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(balance_cents), 0)::BIGINT FROM bank_accounts WHERE bank_id = $1"
+    )
+    .bind(&bank.id)
+    .fetch_one(state.pool())
+    .await?;
+
+    let total_active_loans: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(outstanding_cents), 0)::BIGINT FROM bank_loans WHERE bank_id = $1 AND status = 'active'"
+    )
+    .bind(&bank.id)
+    .fetch_one(state.pool())
+    .await?;
+
+    let agents_with_active_loans: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT agent_id)::BIGINT FROM bank_loans WHERE bank_id = $1 AND status = 'active'"
+    )
+    .bind(&bank.id)
+    .fetch_one(state.pool())
+    .await?;
+
+    let reserve_requirement = ((total_deposits as f64) * bank.reserve_ratio).ceil() as i64;
+    let reserve_buffer = (bank.balance_cents - reserve_requirement).max(0);
+    let utilization_ratio = if total_deposits > 0 {
+        (total_active_loans as f64) / (total_deposits as f64)
+    } else {
+        0.0
+    };
+
+    Ok(Json(ApiResponse::from(BankTrendsResponse {
+        bank_id: bank.id,
+        as_of: Utc::now().to_rfc3339(),
+        deposits_today_cents: deposits_today,
+        withdrawals_today_cents: withdrawals_today,
+        loans_issued_today_cents: loans_issued_today,
+        repayments_today_cents: repayments_today,
+        interest_paid_today_cents: interest_paid_today,
+        total_deposits_cents: total_deposits,
+        total_active_loans_cents: total_active_loans,
+        utilization_ratio,
+        reserve_buffer_cents: reserve_buffer,
+        agents_with_active_loans,
+    })))
+}
+
+pub async fn action_check_rate_policy_context(
+    State(state): State<AppState>,
+    AgentId(_agent_id): AgentId,
+) -> AppResult<Json<ApiResponse<RatePolicyContextResponse>>> {
+    let bank = get_default_bank(state.pool()).await?;
+    let today = Utc::now().date_naive();
+
+    let total_deposits: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(balance_cents), 0)::BIGINT FROM bank_accounts WHERE bank_id = $1"
+    )
+    .bind(&bank.id)
+    .fetch_one(state.pool())
+    .await?;
+
+    let reserve_requirement = ((total_deposits as f64) * bank.reserve_ratio).ceil() as i64;
+    let available_to_lend = (bank.balance_cents - reserve_requirement).max(0);
+
+    let lendable_funds_status = if available_to_lend < (total_deposits as f64 * 0.1).ceil() as i64 {
+        "tight"
+    } else if available_to_lend > (total_deposits as f64 * 0.4).ceil() as i64 {
+        "abundant"
+    } else {
+        "adequate"
+    };
+
+    let deposits_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'deposit' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let withdrawals_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'withdrawal' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let net_deposit_change = deposits_today - withdrawals_today;
+    let deposit_growth_status = if net_deposit_change > 0 { "high" } else if net_deposit_change < 0 { "low" } else { "steady" };
+
+    let loans_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'loan_disbursement' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let repayments_today: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_cents), 0)::BIGINT FROM bank_ledger_entries WHERE bank_id = $1 AND entry_type = 'loan_repayment' AND DATE(created_at) = $2"
+    )
+    .bind(&bank.id)
+    .bind(today)
+    .fetch_one(state.pool())
+    .await?;
+
+    let net_loan_change = loans_today - repayments_today;
+    let loan_growth_status = if net_loan_change > 0 { "high" } else if net_loan_change < 0 { "low" } else { "steady" };
+
+    let current_spread = bank.loan_rate_daily - bank.deposit_rate_daily;
+    let spread_floor = 0.0005;
+    let spread_ceiling = 0.0050;
+    let deposit_floor = 0.0_f64;
+    let deposit_ceiling = bank.deposit_rate_daily + 0.001;
+    let loan_floor = bank.loan_rate_daily.max(bank.deposit_rate_daily + spread_floor);
+    let loan_ceiling = (bank.loan_rate_daily + 0.002).min(MAX_DAILY_RATE);
+
+    Ok(Json(ApiResponse::from(RatePolicyContextResponse {
+        bank_id: bank.id,
+        current_spread,
+        deposit_rate_daily: bank.deposit_rate_daily,
+        loan_rate_daily: bank.loan_rate_daily,
+        lendable_funds_status: lendable_funds_status.to_string(),
+        deposit_growth_status: deposit_growth_status.to_string(),
+        loan_growth_status: loan_growth_status.to_string(),
+        suggested_safe_spread: format!("{:.4} to {:.4}", spread_floor, spread_ceiling),
+        suggested_deposit_rate_range: format!("{:.4} to {:.4}", deposit_floor, deposit_ceiling),
+        suggested_loan_rate_range: format!("{:.4} to {:.4}", loan_floor, loan_ceiling),
+    })))
+}
+
+pub async fn action_explain_bank_policy(
+    State(_state): State<AppState>,
+) -> AppResult<Json<ApiResponse<ExplainBankPolicyResponse>>> {
+    Ok(Json(ApiResponse::from(ExplainBankPolicyResponse {
+        explanation: r#"Banking policy fundamentals:
+
+1. Deposits increase reserves. When agents deposit money, the bank has more funds to work with.
+2. The loan rate should generally exceed the deposit rate. This spread is how the bank earns income.
+3. Higher deposit rates attract more savings but cost the bank more in interest payments.
+4. Higher loan rates slow borrowing but increase income per loan. They also increase borrower burden.
+5. The reserve constraint limits lending. A fraction of deposits must be kept in reserve and cannot be loaned out.
+6. The utilization ratio (loans / deposits) shows how aggressively the bank is lending. High ratios mean less buffer.
+7. A healthy bank maintains a positive spread, adequate reserves, and steady deposit growth.
+
+As a banker, your goal is to set rates that balance attracting deposits with profitable lending, while keeping reserves safe."#.to_string(),
+    })))
 }
 
 fn validate_amount(amount_cents: i64) -> AppResult<()> {

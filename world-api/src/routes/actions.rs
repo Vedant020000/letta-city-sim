@@ -3580,6 +3580,7 @@ pub async fn get_tool_manifest(
         tool_get_transaction_log(),
         tool_check_bank_rates(),
         tool_check_bank_account(),
+        tool_explain_bank_policy(),
         tool_check_vitals(),
         tool_check_world_time(),
         tool_set_intention(),
@@ -3624,6 +3625,8 @@ pub async fn get_tool_manifest(
     if is_banker && at_bank {
         tools.push(tool_set_bank_rates());
         tools.push(tool_check_bank_balance_sheet());
+        tools.push(tool_check_bank_trends());
+        tools.push(tool_check_rate_policy_context());
     }
 
     // Check for priced items at current location (shop shelves) — only if shop is open
@@ -4456,6 +4459,36 @@ fn tool_check_bank_balance_sheet() -> WorldToolDefinition {
         name: "check_bank_balance_sheet".to_string(),
         description: "Banker-only. Inspect bank cash, total deposits, outstanding loans, reserve requirement, and lendable funds.".to_string(),
         endpoint: "/actions/check_bank_balance_sheet".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_check_bank_trends() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_bank_trends".to_string(),
+        description: "Banker-only. Inspect recent bank activity: deposits, withdrawals, loans, repayments, interest, utilization ratio, reserve buffer, and agents with active loans.".to_string(),
+        endpoint: "/actions/check_bank_trends".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_check_rate_policy_context() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_rate_policy_context".to_string(),
+        description: "Banker-only. Get current spread, lendable-funds tightness, deposit and loan growth status, and suggested safe rate ranges to guide rate-setting decisions.".to_string(),
+        endpoint: "/actions/check_rate_policy_context".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_explain_bank_policy() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "explain_bank_policy".to_string(),
+        description: "Read a concise explanation of how bank policy works: reserves, spreads, deposit vs loan rate tradeoffs, and the utilization ratio. Useful for any agent who wants to understand banking fundamentals.".to_string(),
+        endpoint: "/actions/explain_bank_policy".to_string(),
         method: "POST".to_string(),
         parameters: json!({"type": "object", "properties": {}, "required": []}),
     }
