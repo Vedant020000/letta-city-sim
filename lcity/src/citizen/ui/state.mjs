@@ -39,6 +39,14 @@ function eventSummary(event, payload = {}) {
       return `loaded ${payload.toolCount} tools for ${payload.locationName || payload.locationId || "current context"}`;
     case "session_initialized":
       return `session ready ${payload.conversationId || ""} (${payload.toolCount || 0} tools)`;
+    case "claim_loop_started":
+      return `claim loop started: ${payload.apiBase}`;
+    case "claim_empty":
+      return `no wake available`;
+    case "claim_error":
+      return `claim error: ${safeMessage(payload.error, "unknown")}`;
+    case "claim_loop_stopped":
+      return `claim loop stopped after ${payload.processed || 0} wakes`;
     case "socket_connecting":
       return `connecting websocket: ${payload.wsUrl}`;
     case "socket_connected":
@@ -113,6 +121,17 @@ export function createHarnessStore(config) {
     const ts = payload.ts || nowIso();
 
     switch (event) {
+      case "claim_loop_started":
+      case "claim_empty":
+        state.connectionState = "connected";
+        break;
+      case "claim_error":
+        state.connectionState = "error";
+        state.lastError = safeMessage(payload.error, "claim error");
+        break;
+      case "claim_loop_stopped":
+        state.connectionState = "disconnected";
+        break;
       case "socket_connecting":
         state.connectionState = "connecting";
         break;

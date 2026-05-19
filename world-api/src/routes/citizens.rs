@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{
-        Path, State,
+        Path, Query, State,
         rejection::JsonRejection,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
@@ -28,6 +28,8 @@ const HEADER_AGENT_ID: &str = "x-agent-id";
 const HEADER_WAKE_TOKEN: &str = "x-wake-token";
 const WAKE_QUEUE_CAP: i64 = 16;
 const WAKE_TOKEN_TTL_SECONDS: i64 = 300;
+const WAKE_CLAIM_TTL_SECONDS: i64 = 300;
+const MAX_CLAIM_WAIT_MS: u64 = 30_000;
 
 #[derive(Debug, Deserialize)]
 pub struct CitizenActionRequest {
@@ -43,6 +45,17 @@ pub struct AdminTestWakeRequest {
     pub narrative: Option<String>,
     pub structured: Option<Value>,
     pub expects_response: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ClaimWakeQuery {
+    pub wait_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RespondWakeRequest {
+    pub status: String,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -65,6 +78,23 @@ pub struct EnqueuedCitizenWake {
 
 #[derive(Debug, sqlx::FromRow)]
 struct OpenWakeRow {
+    event_id: String,
+    seq: i64,
+    wake_type: String,
+    world_time: DateTime<Utc>,
+    wall_time: DateTime<Utc>,
+    agent_snapshot: Value,
+    trigger_payload: Value,
+    prompt_narrative: String,
+    prompt_structured: Option<Value>,
+    tools: Value,
+    wake_token_expires_at: DateTime<Utc>,
+    expects_response: bool,
+    dropped_for_overflow_count: i32,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ClaimableWakeRow {
     event_id: String,
     seq: i64,
     wake_type: String,
@@ -123,6 +153,233 @@ pub async fn ws_citizen(
         .ok_or(AppError::Forbidden)?;
 
     Ok(ws.on_upgrade(move |socket| handle_citizen_socket(state, agent_id, socket)))
+}
+
+pub async fn claim_citizen_wake(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    headers: HeaderMap,
+    Query(query): Query<ClaimWakeQuery>,
+) -> Response {
+    let Some(agent_id) = auth.agent_id().map(str::to_string) else {
+        return citizen_protocol_response(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Citizen wake claims require bearer-token agent auth.",
+            false,
+            false,
+            None,
+        );
+    };
+
+    match required_header(&headers, HEADER_AGENT_ID) {
+        Ok(header_agent_id) if header_agent_id == agent_id => {}
+        Ok(_) => {
+            return citizen_protocol_response(
+                StatusCode::FORBIDDEN,
+                "agent_mismatch",
+                "x-agent-id does not match the authenticated citizen identity.",
+                false,
+                false,
+                None,
+            );
+        }
+        Err(message) => {
+            return citizen_protocol_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                &message,
+                false,
+                false,
+                None,
+            );
+        }
+    }
+
+    let runner_id = headers
+        .get("x-runner-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("lcity-cli")
+        .to_string();
+
+    let wait_ms = query.wait_ms.unwrap_or(0).min(MAX_CLAIM_WAIT_MS);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
+
+    loop {
+        match claim_citizen_wake_once(&state, &agent_id, &runner_id).await {
+            Ok(Some(payload)) => return json_value_response(StatusCode::OK, payload),
+            Ok(None) if wait_ms == 0 || std::time::Instant::now() >= deadline => {
+                return StatusCode::NO_CONTENT.into_response();
+            }
+            Ok(None) => {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(err) => return citizen_internal_error_response(err),
+        }
+    }
+}
+
+pub async fn respond_citizen_wake(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    headers: HeaderMap,
+    Path(wake_event_id): Path<String>,
+    payload: Result<Json<RespondWakeRequest>, JsonRejection>,
+) -> Response {
+    let Some(agent_id) = auth.agent_id().map(str::to_string) else {
+        return citizen_protocol_response(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Citizen wake responses require bearer-token agent auth.",
+            false,
+            false,
+            None,
+        );
+    };
+
+    match required_header(&headers, HEADER_AGENT_ID) {
+        Ok(header_agent_id) if header_agent_id == agent_id => {}
+        Ok(_) => {
+            return citizen_protocol_response(
+                StatusCode::FORBIDDEN,
+                "agent_mismatch",
+                "x-agent-id does not match the authenticated citizen identity.",
+                false,
+                false,
+                None,
+            );
+        }
+        Err(message) => {
+            return citizen_protocol_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                &message,
+                false,
+                false,
+                None,
+            );
+        }
+    }
+
+    let wake_token = match required_header(&headers, HEADER_WAKE_TOKEN) {
+        Ok(value) => value,
+        Err(message) => {
+            return citizen_protocol_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                &message,
+                false,
+                false,
+                None,
+            );
+        }
+    };
+
+    let payload = match payload {
+        Ok(Json(payload)) => payload,
+        Err(_) => RespondWakeRequest {
+            status: "done".to_string(),
+            reason: None,
+        },
+    };
+
+    let requested_status = payload.status.trim().to_lowercase();
+    let (status, reason) = match requested_status.as_str() {
+        "done" => ("done", None),
+        "aborted" | "abort" => ("aborted", payload.reason),
+        "failed" | "error" => ("aborted", payload.reason.or_else(|| Some("client_failed".to_string()))),
+        _ => {
+            return citizen_protocol_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_status",
+                "Wake response status must be done, aborted, or failed.",
+                false,
+                false,
+                None,
+            );
+        }
+    };
+
+    let mut tx = match state.pool().begin().await {
+        Ok(tx) => tx,
+        Err(err) => return citizen_internal_error_response(err.into()),
+    };
+
+    let locked_wake = match lock_wake_for_action(&mut tx, &agent_id, &wake_event_id).await {
+        Ok(Some(wake)) => wake,
+        Ok(None) => {
+            return citizen_protocol_response(
+                StatusCode::CONFLICT,
+                "wake_closed",
+                "That wake is no longer open.",
+                true,
+                true,
+                None,
+            );
+        }
+        Err(err) => return citizen_internal_error_response(err),
+    };
+
+    let expected_wake_token = match derive_wake_token(
+        &locked_wake.event_id,
+        &locked_wake.agent_id,
+        locked_wake.seq,
+        locked_wake.wake_token_expires_at,
+    ) {
+        Ok(token) => token,
+        Err(err) => return citizen_internal_error_response(err),
+    };
+
+    if wake_token != expected_wake_token {
+        return citizen_protocol_response(
+            StatusCode::FORBIDDEN,
+            "invalid_wake_token",
+            "The supplied wake token is not valid for this wake.",
+            false,
+            false,
+            None,
+        );
+    }
+
+    if locked_wake.status != "open" {
+        return citizen_protocol_response(
+            StatusCode::CONFLICT,
+            "wake_closed",
+            "That wake is no longer open.",
+            true,
+            true,
+            None,
+        );
+    }
+
+    let promoted = match close_wake_tx(&mut tx, &agent_id, &wake_event_id, status, reason).await {
+        Ok(promoted) => promoted,
+        Err(err) => return citizen_internal_error_response(err),
+    };
+
+    if let Err(err) = tx.commit().await {
+        return citizen_internal_error_response(err.into());
+    }
+
+    if promoted {
+        let _ = state.citizen_signal_tx().send(agent_id.clone());
+    }
+
+    json_value_response(
+        StatusCode::OK,
+        json!({
+            "ok": true,
+            "event_id": wake_event_id,
+            "status": status,
+            "promoted_next_wake": promoted,
+            "control": {
+                "ends_turn": true,
+                "wake_closed": true,
+            }
+        }),
+    )
 }
 
 pub async fn citizen_action(
@@ -589,6 +846,7 @@ async fn deliver_open_wake(
     socket: &mut WebSocket,
     last_sent_event_id: &mut Option<String>,
 ) -> AppResult<()> {
+    release_expired_claims(state, agent_id).await?;
     expire_open_wake_if_needed(state, agent_id).await?;
 
     let wake = sqlx::query_as::<_, OpenWakeRow>(
@@ -599,6 +857,7 @@ async fn deliver_open_wake(
         FROM citizen_wakes
         WHERE agent_id = $1
           AND status = 'open'
+          AND claimed_at IS NULL
         ORDER BY seq ASC
         LIMIT 1
         "#,
@@ -650,6 +909,117 @@ async fn deliver_open_wake(
 
     *last_sent_event_id = payload["event_id"].as_str().map(str::to_string);
     Ok(())
+}
+
+fn wake_payload(wake: ClaimableWakeRow, agent_id: &str) -> AppResult<Value> {
+    let wake_token = derive_wake_token(
+        &wake.event_id,
+        agent_id,
+        wake.seq,
+        wake.wake_token_expires_at,
+    )?;
+
+    Ok(json!({
+        "event_id": wake.event_id,
+        "seq": wake.seq,
+        "type": wake.wake_type,
+        "world_time": wake.world_time.to_rfc3339(),
+        "wall_time": wake.wall_time.to_rfc3339(),
+        "agent": wake.agent_snapshot,
+        "trigger": wake.trigger_payload,
+        "prompt": {
+            "narrative": wake.prompt_narrative,
+            "structured": wake.prompt_structured,
+        },
+        "tools": wake.tools,
+        "wake_token": wake_token,
+        "wake_token_expires_at": wake.wake_token_expires_at.to_rfc3339(),
+        "expects_response": wake.expects_response,
+        "meta": {
+            "dropped_for_overflow_count": wake.dropped_for_overflow_count,
+        }
+    }))
+}
+
+async fn release_expired_claims(state: &AppState, agent_id: &str) -> AppResult<()> {
+    let mut tx = state.pool().begin().await?;
+    release_expired_claims_tx(&mut tx, agent_id).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn release_expired_claims_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    agent_id: &str,
+) -> AppResult<()> {
+    sqlx::query(
+        r#"
+        UPDATE citizen_wakes
+        SET claimed_at = NULL,
+            claim_expires_at = NULL,
+            claimed_by = NULL,
+            wake_token_expires_at = NOW() + ($2 || ' seconds')::INTERVAL
+        WHERE agent_id = $1
+          AND status = 'open'
+          AND claim_expires_at IS NOT NULL
+          AND claim_expires_at <= NOW()
+        "#,
+    )
+    .bind(agent_id)
+    .bind(WAKE_TOKEN_TTL_SECONDS)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+async fn claim_citizen_wake_once(
+    state: &AppState,
+    agent_id: &str,
+    runner_id: &str,
+) -> AppResult<Option<Value>> {
+    let mut tx = state.pool().begin().await?;
+
+    release_expired_claims_tx(&mut tx, agent_id).await?;
+
+    let wake = sqlx::query_as::<_, ClaimableWakeRow>(
+        r#"
+        WITH selected AS (
+            SELECT event_id
+            FROM citizen_wakes
+            WHERE agent_id = $1
+              AND status = 'open'
+              AND (claimed_at IS NULL OR claim_expires_at <= NOW())
+            ORDER BY seq ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE citizen_wakes cw
+        SET claimed_at = NOW(),
+            claim_expires_at = NOW() + ($2 || ' seconds')::INTERVAL,
+            claimed_by = $3,
+            wake_token_expires_at = NOW() + ($4 || ' seconds')::INTERVAL
+        FROM selected
+        WHERE cw.event_id = selected.event_id
+        RETURNING cw.event_id, cw.seq, cw.wake_type, cw.world_time, cw.wall_time,
+                  cw.agent_snapshot, cw.trigger_payload, cw.prompt_narrative,
+                  cw.prompt_structured, cw.tools, cw.wake_token_expires_at,
+                  cw.expects_response, cw.dropped_for_overflow_count
+        "#,
+    )
+    .bind(agent_id)
+    .bind(WAKE_CLAIM_TTL_SECONDS)
+    .bind(runner_id)
+    .bind(WAKE_TOKEN_TTL_SECONDS)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    match wake {
+        Some(wake) => Ok(Some(wake_payload(wake, agent_id)?)),
+        None => Ok(None),
+    }
 }
 
 async fn enqueue_test_wake(
@@ -1123,7 +1493,10 @@ async fn expire_locked_wake_and_promote(
         r#"
         UPDATE citizen_wakes
         SET status = 'expired',
-            closed_at = NOW()
+            closed_at = NOW(),
+            claimed_at = NULL,
+            claim_expires_at = NULL,
+            claimed_by = NULL
         WHERE event_id = $1
         "#,
     )
@@ -1146,13 +1519,18 @@ async fn close_wake_tx(
         UPDATE citizen_wakes
         SET status = $2,
             abort_reason = $3,
-            closed_at = NOW()
+            closed_at = NOW(),
+            claimed_at = NULL,
+            claim_expires_at = NULL,
+            claimed_by = NULL
         WHERE event_id = $1
+          AND agent_id = $4
         "#,
     )
     .bind(event_id)
     .bind(status)
     .bind(abort_reason)
+    .bind(agent_id)
     .execute(&mut **tx)
     .await?;
 
@@ -1201,12 +1579,17 @@ async fn promote_next_wake_tx(
         UPDATE citizen_wakes
         SET status = 'open',
             opened_at = NOW(),
-            dropped_for_overflow_count = $2
+            wake_token_expires_at = NOW() + ($3 || ' seconds')::INTERVAL,
+            dropped_for_overflow_count = $2,
+            claimed_at = NULL,
+            claim_expires_at = NULL,
+            claimed_by = NULL
         WHERE event_id = $1
         "#,
     )
     .bind(&next_event_id)
     .bind(pending_drops)
+    .bind(WAKE_TOKEN_TTL_SECONDS)
     .execute(&mut **tx)
     .await?;
 
@@ -1237,6 +1620,7 @@ async fn expire_open_wake_if_needed(state: &AppState, agent_id: &str) -> AppResu
         WHERE agent_id = $1
           AND status = 'open'
           AND wake_token_expires_at <= NOW()
+          AND (claimed_at IS NULL OR claim_expires_at IS NULL)
         ORDER BY seq ASC
         LIMIT 1
         FOR UPDATE
@@ -1255,7 +1639,10 @@ async fn expire_open_wake_if_needed(state: &AppState, agent_id: &str) -> AppResu
         r#"
         UPDATE citizen_wakes
         SET status = 'expired',
-            closed_at = NOW()
+            closed_at = NOW(),
+            claimed_at = NULL,
+            claim_expires_at = NULL,
+            claimed_by = NULL
         WHERE event_id = $1
         "#,
     )

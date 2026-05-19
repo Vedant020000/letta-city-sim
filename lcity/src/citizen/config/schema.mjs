@@ -11,6 +11,8 @@ export const DEFAULTS = {
   },
   runtime: {
     max_wake_iterations: 8,
+    wake_transport: "claim",
+    claim_wait_ms: 25000,
     reconnect_initial_ms: 500,
     reconnect_max_ms: 5000,
     recent_wake_cache_size: 128,

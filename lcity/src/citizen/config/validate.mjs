@@ -76,6 +76,14 @@ export function validateResolvedConfig(resolved) {
     errors.push("runtime.max_wake_iterations must be a positive integer");
   }
 
+  if (!["claim", "ws"].includes(resolved.runtime.wake_transport.value)) {
+    errors.push("runtime.wake_transport must be one of claim, ws");
+  }
+
+  if (!isPositiveInteger(resolved.runtime.claim_wait_ms.value)) {
+    errors.push("runtime.claim_wait_ms must be a positive integer");
+  }
+
   if (!isPositiveInteger(resolved.runtime.reconnect_initial_ms.value)) {
     errors.push("runtime.reconnect_initial_ms must be a positive integer");
   }

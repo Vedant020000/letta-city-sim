@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { processWake } from "./session-runner.mjs";
+import { claimCitizenWake } from "./world-api.mjs";
 
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -56,6 +57,42 @@ function createRecentWakeTracker(limit = 128) {
       active.delete(eventId);
     },
   };
+}
+
+
+async function runClaimLoop(config, tracker, emit, signal) {
+  emit("claim_loop_started", {
+    apiBase: config.world.api_base.value,
+    waitMs: config.runtime.claim_wait_ms.value,
+  });
+
+  let processed = 0;
+  const maxIterations = config.runtime.max_wake_iterations.value;
+
+  while (!signal?.aborted && processed < maxIterations) {
+    const result = await claimCitizenWake(config);
+
+    if (result.status_code === 204) {
+      emit("claim_empty", {});
+      continue;
+    }
+
+    if (!result.ok) {
+      const message = result.wake?.error?.message || result.wake?.error || `claim failed HTTP ${result.status_code}`;
+      emit("claim_error", { error: new Error(message), status: result.status_code });
+      throw new Error(message);
+    }
+
+    if (!result.wake?.event_id) {
+      emit("claim_error", { error: new Error("claim response did not include a wake"), status: result.status_code });
+      throw new Error("claim response did not include a wake");
+    }
+
+    processed += 1;
+    await processWake(config, result.wake, tracker, emit, signal);
+  }
+
+  emit("claim_loop_stopped", { processed, maxIterations });
 }
 
 async function runSocketSession(config, tracker, emit, signal) {
@@ -145,6 +182,11 @@ async function runSocketSession(config, tracker, emit, signal) {
 
 export async function runWakeLoop(config, emit, signal) {
   const tracker = createRecentWakeTracker(config.runtime.recent_wake_cache_size.value);
+
+  if (config.runtime.wake_transport.value === "claim") {
+    await runClaimLoop(config, tracker, emit, signal);
+    return;
+  }
 
   let backoffMs = config.runtime.reconnect_initial_ms.value;
   while (!signal?.aborted) {

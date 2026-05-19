@@ -1,6 +1,6 @@
 import { resumeSession } from "@letta-ai/letta-code-sdk";
 import { buildWorldTools } from "./tool-registry.mjs";
-import { fetchToolManifest, invokeCitizenLifecycle } from "./world-api.mjs";
+import { fetchToolManifest, respondCitizenWake } from "./world-api.mjs";
 
 function buildWakeInput(wake, manifest) {
   const locationName = manifest.location_name || wake.agent?.location?.name || wake.agent?.location?.id || "unknown location";
@@ -202,8 +202,8 @@ export async function processWake(config, wake, tracker, emit, signal) {
       session.close();
     }
 
-    const doneResult = await invokeCitizenLifecycle(config, wake, "wake_done", {});
-    if (doneResult.body?.control?.wake_closed) {
+    const doneResult = await respondCitizenWake(config, wake, "done");
+    if (doneResult.body?.control?.wake_closed || doneResult.body?.ok) {
       wakeClosed = true;
     }
 
@@ -223,9 +223,12 @@ export async function processWake(config, wake, tracker, emit, signal) {
     emit("wake_error", { eventId: wake.event_id, error });
 
     try {
-      await invokeCitizenLifecycle(config, wake, "wake_abort", {
-        reason: `harness_error:${String(error?.message || error).slice(0, 120)}`,
-      });
+      await respondCitizenWake(
+        config,
+        wake,
+        "failed",
+        `harness_error:${String(error?.message || error).slice(0, 120)}`,
+      );
       emit("wake_abort_sent", { eventId: wake.event_id });
     } catch (abortError) {
       emit("wake_abort_failed", { eventId: wake.event_id, error: abortError });
