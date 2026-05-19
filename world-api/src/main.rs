@@ -41,6 +41,7 @@ use routes::actions::{
     action_send_message, action_set_activity, action_set_intention, action_sleep,
     action_speak_to, action_transfer_item, action_use_item, action_wake_up, get_tool_manifest,
 };
+use routes::applications::{create_application, get_application, list_applications, approve_application, reject_application, get_admin_application};
 use routes::banking::{
     action_check_bank_account, action_check_bank_balance_sheet, action_check_bank_rates,
     action_check_bank_trends, action_check_rate_policy_context, action_explain_bank_policy,
@@ -200,9 +201,15 @@ async fn main() -> AppResult<()> {
         .route("/objects/:id", patch(update_object_state))
         .route("/pathfind", get(get_path))
         .route("/town/pulse", get(get_town_pulse))
+        .route("/applications", post(create_application))
+        .route("/applications/:id", get(get_application))
         .route("/agents", get(list_agents))
         .route("/agents/health", get(agent_health_check))
         .route("/agents/move", patch(move_agent_with_header))
+        .route("/admin/applications", get(list_applications))
+        .route("/admin/applications/:id", get(get_admin_application))
+        .route("/admin/applications/:id/approve", post(approve_application))
+        .route("/admin/applications/:id/reject", post(reject_application))
         .route("/admin/agents/:id/tokens", get(list_agent_tokens))
         .route("/admin/agents/:id/tokens", post(create_agent_token))
         .route(
