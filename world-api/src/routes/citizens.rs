@@ -973,6 +973,28 @@ async fn load_agent_wake_snapshot_tx(
         })
         .collect();
 
+    // Enrich with intention
+    let current_intention = sqlx::query_as::<_, (String, String, String)>(
+        r#"
+        SELECT summary, reason, expected_location_id
+        FROM agent_intentions
+        WHERE agent_id = $1 AND status = 'active'
+        LIMIT 1
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    let intention_json = match current_intention {
+        Some((summary, reason, expected_location_id)) => json!({
+            "summary": summary,
+            "reason": reason,
+            "expected_location_id": expected_location_id,
+        }),
+        None => Value::Null,
+    };
+
     Ok(json!({
         "agent_id": snapshot.id,
         "citizen_id": snapshot.id,
@@ -993,6 +1015,7 @@ async fn load_agent_wake_snapshot_tx(
             "appearance_level": agent.appearance_level,
         },
         "inventory": inventory_json,
+        "current_intention": intention_json,
         "world_time": {
             "hour": sim_hour,
             "time_of_day": crate::routes::world::time_of_day_from_hour(sim_hour),

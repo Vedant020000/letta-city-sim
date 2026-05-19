@@ -3351,6 +3351,38 @@ pub async fn action_set_intention(
     AgentId(agent_id): AgentId,
     Json(payload): Json<CreateAgentIntentionRequest>,
 ) -> AppResult<Json<ApiResponse<AgentIntention>>> {
+    // Auto-abandon existing active intention if one exists
+    let existing = sqlx::query_as::<_, AgentIntention>(
+        r#"
+        SELECT id, agent_id, summary, reason, status, expected_location_id, expected_action,
+               outcome, metadata, created_at, updated_at, completed_at
+        FROM agent_intentions
+        WHERE agent_id = $1 AND status = 'active'
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?;
+
+    if let Some(prev) = existing {
+        // Abandon the previous intention
+        let _ = crate::routes::intentions::update_agent_intention(
+            State(state.clone()),
+            crate::auth::AuthContext::agent(agent_id.clone()),
+            Path(crate::routes::intentions::AgentIntentionPath {
+                id: agent_id.clone(),
+                intention_id: prev.id,
+            }),
+            Json(crate::models::intention::UpdateAgentIntentionRequest {
+                status: Some("abandoned".to_string()),
+                outcome: Some(format!("Abandoned for new intention: {}", payload.summary)),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    }
+
+    // Create the new intention
     crate::routes::intentions::create_agent_intention(
         State(state),
         crate::auth::AuthContext::agent(agent_id.clone()),
@@ -5074,7 +5106,7 @@ fn tool_groom() -> WorldToolDefinition {
 fn tool_set_intention() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "set_intention".to_string(),
-        description: "Set your current intention — what you plan to do next. You can only have one active intention at a time. Use this to plan your next action (e.g., 'go to the cafe to eat', 'walk to the park').".to_string(),
+        description: "Set your current intention — what you plan to do next and why. If you already have an active intention, it will be automatically abandoned and replaced with the new one. Use this before starting any meaningful action sequence.".to_string(),
         endpoint: "/actions/set_intention".to_string(),
         method: "POST".to_string(),
         parameters: json!({
@@ -5129,7 +5161,7 @@ fn tool_complete_intention() -> WorldToolDefinition {
 fn tool_get_intention() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "get_intention".to_string(),
-        description: "Get your current active intention, if any. Returns null if you have no active intention.".to_string(),
+        description: "Get your current active intention, including the summary, reason, expected location, and expected action. Returns null if you have no active intention.".to_string(),
         endpoint: "/actions/get_intention".to_string(),
         method: "POST".to_string(),
         parameters: json!({
