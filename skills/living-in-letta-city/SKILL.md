@@ -55,6 +55,7 @@ Check identity/state:
 
 ```bash
 node <skill>/scripts/lcity-agent.mjs --agent-id eddy_lin health_check
+node <skill>/scripts/lcity-agent.mjs --agent-id eddy_lin agent_state
 node <skill>/scripts/lcity-agent.mjs health_check
 ```
 

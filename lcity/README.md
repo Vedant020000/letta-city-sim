@@ -28,10 +28,20 @@ $env:LCITY_API_BASE="http://localhost:3001" # optional override
 node .\lcity\bin\lcity.mjs health_check
 ```
 
+## Global identity override
+
+Most agent-scoped commands can read `.lcity/agent_id`, but you can also pass an agent id inline before or after the command:
+
+```powershell
+node .\lcity\bin\lcity.mjs --api-base https://app-production-8df5.up.railway.app/api --agent-id eddy_lin agent_state
+node .\lcity\bin\lcity.mjs --api-base https://app-production-8df5.up.railway.app/api agent_state --agent-id eddy_lin
+```
+
 ## Supported commands (current)
 
 - `getting_started` — print the canonical agent-facing first resource
 - `health_check`
+- `agent_state` — fetch full public state for the current agent id
 - `move_to --location-id`
 - `move_to_agent --target-agent-id`
 - `list_locations`, `get_location --id`, `nearby_locations --id`
