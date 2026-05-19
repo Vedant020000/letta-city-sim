@@ -1361,7 +1361,7 @@ pub async fn action_clean_shop(
 
     // Update the checkout counter's last_cleaned_at
     let prefix = agent.current_location_id.split('_').take(2).collect::<Vec<_>>().join("_");
-    let counter_id = format!("{}_counter_{}", prefix, prefix.split('_').last().unwrap_or("harvey"));
+    let _counter_id = format!("{}_counter_{}", prefix, prefix.split('_').last().unwrap_or("harvey"));
 
     // Try to find the counter object at this shop
     let now_str = Utc::now().to_rfc3339();
@@ -1486,7 +1486,7 @@ pub async fn action_browse_shop(
 
 pub async fn action_list_job_openings(
     State(state): State<AppState>,
-    AgentId(agent_id): AgentId,
+    AgentId(_agent_id): AgentId,
 ) -> AppResult<Json<ApiResponse<Vec<JobOpening>>>> {
     let rows = sqlx::query(
         r#"
@@ -2320,6 +2320,7 @@ pub async fn action_collect_city_wage(
 // ---------------------------------------------------------------------------
 
 // Helper: get current mayor agent id
+#[allow(dead_code)]
 async fn get_current_mayor(pool: &sqlx::PgPool) -> AppResult<String> {
     sqlx::query_scalar::<_, String>(
         r#"SELECT agent_id FROM mayor_terms WHERE is_current = TRUE LIMIT 1"#,
@@ -2363,7 +2364,7 @@ pub struct ReadCivicBoardRequest {
 
 pub async fn action_read_civic_board(
     State(state): State<AppState>,
-    AgentId(agent_id): AgentId,
+    AgentId(_agent_id): AgentId,
     Json(payload): Json<ReadCivicBoardRequest>,
 ) -> AppResult<Json<ApiResponse<Vec<CivicPost>>>> {
     let rows = if let Some(filter_type) = &payload.r#type {
@@ -3350,6 +3351,38 @@ pub async fn action_set_intention(
     AgentId(agent_id): AgentId,
     Json(payload): Json<CreateAgentIntentionRequest>,
 ) -> AppResult<Json<ApiResponse<AgentIntention>>> {
+    // Auto-abandon existing active intention if one exists
+    let existing = sqlx::query_as::<_, AgentIntention>(
+        r#"
+        SELECT id, agent_id, summary, reason, status, expected_location_id, expected_action,
+               outcome, metadata, created_at, updated_at, completed_at
+        FROM agent_intentions
+        WHERE agent_id = $1 AND status = 'active'
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?;
+
+    if let Some(prev) = existing {
+        // Abandon the previous intention
+        let _ = crate::routes::intentions::update_agent_intention(
+            State(state.clone()),
+            crate::auth::AuthContext::agent(agent_id.clone()),
+            Path(crate::routes::intentions::AgentIntentionPath {
+                id: agent_id.clone(),
+                intention_id: prev.id,
+            }),
+            Json(crate::models::intention::UpdateAgentIntentionRequest {
+                status: Some("abandoned".to_string()),
+                outcome: Some(format!("Abandoned for new intention: {}", payload.summary)),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    }
+
+    // Create the new intention
     crate::routes::intentions::create_agent_intention(
         State(state),
         crate::auth::AuthContext::agent(agent_id.clone()),
@@ -3580,6 +3613,8 @@ pub async fn get_tool_manifest(
         tool_get_transaction_log(),
         tool_check_bank_rates(),
         tool_check_bank_account(),
+        tool_explain_bank_policy(),
+        tool_check_location_roles(),
         tool_check_vitals(),
         tool_check_world_time(),
         tool_set_intention(),
@@ -3624,6 +3659,8 @@ pub async fn get_tool_manifest(
     if is_banker && at_bank {
         tools.push(tool_set_bank_rates());
         tools.push(tool_check_bank_balance_sheet());
+        tools.push(tool_check_bank_trends());
+        tools.push(tool_check_rate_policy_context());
     }
 
     // Check for priced items at current location (shop shelves) — only if shop is open
@@ -3677,7 +3714,7 @@ pub async fn get_tool_manifest(
     .fetch_optional(state.pool())
     .await?;
 
-    if let Some((shop_id, shop_prefix)) = shop_info {
+    if let Some((_shop_id, shop_prefix)) = shop_info {
         let at_own_shop = agent_row.1.starts_with(&format!("{}_", shop_prefix));
 
         if at_own_shop {
@@ -4461,6 +4498,46 @@ fn tool_check_bank_balance_sheet() -> WorldToolDefinition {
     }
 }
 
+fn tool_check_bank_trends() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_bank_trends".to_string(),
+        description: "Banker-only. Inspect recent bank activity: deposits, withdrawals, loans, repayments, interest, utilization ratio, reserve buffer, and agents with active loans.".to_string(),
+        endpoint: "/actions/check_bank_trends".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_check_rate_policy_context() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_rate_policy_context".to_string(),
+        description: "Banker-only. Get current spread, lendable-funds tightness, deposit and loan growth status, and suggested safe rate ranges to guide rate-setting decisions.".to_string(),
+        endpoint: "/actions/check_rate_policy_context".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_explain_bank_policy() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "explain_bank_policy".to_string(),
+        description: "Read a concise explanation of how bank policy works: reserves, spreads, deposit vs loan rate tradeoffs, and the utilization ratio. Useful for any agent who wants to understand banking fundamentals.".to_string(),
+        endpoint: "/actions/explain_bank_policy".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
+fn tool_check_location_roles() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_location_roles".to_string(),
+        description: "Check who has roles at your current location — residents, owners, workers, managers. Helps you understand who lives or works where you are.".to_string(),
+        endpoint: "/actions/check_location_roles".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({"type": "object", "properties": {}, "required": []}),
+    }
+}
+
 fn tool_check_vitals() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "check_vitals".to_string(),
@@ -4618,6 +4695,7 @@ fn tool_list_job_openings() -> WorldToolDefinition {
     }
 }
 
+#[allow(dead_code)]
 fn tool_apply_for_job() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "apply_for_job".to_string(),
@@ -5028,7 +5106,7 @@ fn tool_groom() -> WorldToolDefinition {
 fn tool_set_intention() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "set_intention".to_string(),
-        description: "Set your current intention — what you plan to do next. You can only have one active intention at a time. Use this to plan your next action (e.g., 'go to the cafe to eat', 'walk to the park').".to_string(),
+        description: "Set your current intention — what you plan to do next and why. If you already have an active intention, it will be automatically abandoned and replaced with the new one. Use this before starting any meaningful action sequence.".to_string(),
         endpoint: "/actions/set_intention".to_string(),
         method: "POST".to_string(),
         parameters: json!({
@@ -5083,7 +5161,7 @@ fn tool_complete_intention() -> WorldToolDefinition {
 fn tool_get_intention() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "get_intention".to_string(),
-        description: "Get your current active intention, if any. Returns null if you have no active intention.".to_string(),
+        description: "Get your current active intention, including the summary, reason, expected location, and expected action. Returns null if you have no active intention.".to_string(),
         endpoint: "/actions/get_intention".to_string(),
         method: "POST".to_string(),
         parameters: json!({

@@ -32,6 +32,7 @@ impl<T: Serialize> From<T> for ApiResponse<T> {
 }
 
 impl<T: Serialize> ApiResponse<T> {
+#[allow(dead_code)]
     pub fn with_notification(mut self, notification: NotificationPayload) -> Self {
         self.notification = Some(notification);
         self

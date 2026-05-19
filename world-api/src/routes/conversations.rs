@@ -22,6 +22,7 @@ pub struct ListConversationsQuery {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CreateConversationRequest {
     pub topic: Option<String>,
 }

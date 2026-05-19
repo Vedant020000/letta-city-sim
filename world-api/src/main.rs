@@ -41,8 +41,10 @@ use routes::actions::{
     action_send_message, action_set_activity, action_set_intention, action_sleep,
     action_speak_to, action_transfer_item, action_use_item, action_wake_up, get_tool_manifest,
 };
+use routes::applications::{create_application, get_application, list_applications, approve_application, reject_application, get_admin_application};
 use routes::banking::{
     action_check_bank_account, action_check_bank_balance_sheet, action_check_bank_rates,
+    action_check_bank_trends, action_check_rate_policy_context, action_explain_bank_policy,
     action_deposit_money, action_repay_loan, action_set_bank_rates, action_take_loan,
     action_withdraw_money,
 };
@@ -70,7 +72,7 @@ use routes::inventory::{
 use routes::jobs::{
     get_job_by_id, list_agent_jobs, list_job_agents, list_jobs, remove_agent_job, upsert_agent_job,
 };
-use routes::locations::{get_location_by_id, get_nearby_locations, list_locations};
+use routes::locations::{action_check_location_roles, get_agent_locations, get_location_by_id, get_nearby_locations, list_locations};
 use routes::objects::{list_objects_by_location, update_object_state};
 use routes::pathfind::get_path;
 use routes::pulse::get_town_pulse;
@@ -148,6 +150,9 @@ async fn main() -> AppResult<()> {
         .route("/actions/repay_loan", post(action_repay_loan))
         .route("/actions/set_bank_rates", post(action_set_bank_rates))
         .route("/actions/check_bank_balance_sheet", post(action_check_bank_balance_sheet))
+        .route("/actions/check_bank_trends", post(action_check_bank_trends))
+        .route("/actions/check_rate_policy_context", post(action_check_rate_policy_context))
+        .route("/actions/explain_bank_policy", post(action_explain_bank_policy))
         .route("/actions/check_vitals", post(action_check_vitals))
         .route("/actions/buy_item", post(action_buy_item))
         .route("/actions/check_shelf_stock", post(action_check_shelf_stock))
@@ -189,6 +194,7 @@ async fn main() -> AppResult<()> {
         .route("/actions/set_intention", post(action_set_intention))
         .route("/actions/complete_intention", post(action_complete_intention))
         .route("/actions/get_intention", post(action_get_intention))
+        .route("/actions/check_location_roles", post(action_check_location_roles))
         .route("/conversations", get(list_active_conversations))
         .route("/conversations/:id", get(get_conversation_detail))
         .route("/locations/:id", get(get_location_by_id))
@@ -200,9 +206,15 @@ async fn main() -> AppResult<()> {
         .route("/objects/:id", patch(update_object_state))
         .route("/pathfind", get(get_path))
         .route("/town/pulse", get(get_town_pulse))
+        .route("/applications", post(create_application))
+        .route("/applications/:id", get(get_application))
         .route("/agents", get(list_agents))
         .route("/agents/health", get(agent_health_check))
         .route("/agents/move", patch(move_agent_with_header))
+        .route("/admin/applications", get(list_applications))
+        .route("/admin/applications/:id", get(get_admin_application))
+        .route("/admin/applications/:id/approve", post(approve_application))
+        .route("/admin/applications/:id/reject", post(reject_application))
         .route("/admin/agents/:id/tokens", get(list_agent_tokens))
         .route("/admin/agents/:id/tokens", post(create_agent_token))
         .route(
@@ -219,6 +231,7 @@ async fn main() -> AppResult<()> {
         .route("/jobs/:id/agents", get(list_job_agents))
         .route("/agents/:id", get(get_agent_by_id))
         .route("/agents/:id/tool-manifest", get(get_tool_manifest))
+        .route("/agents/:id/locations", get(get_agent_locations))
         .route("/agents/:id/intentions", get(list_agent_intentions))
         .route("/agents/:id/intentions", post(create_agent_intention))
         .route("/agents/:id/jobs", get(list_agent_jobs))
