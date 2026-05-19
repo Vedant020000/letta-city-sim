@@ -10,6 +10,8 @@ use crate::models::application::{AgentApplication, CreateApplicationRequest, Rev
 use crate::models::common::ApiResponse;
 use crate::state::AppState;
 
+const AGENT_TOKEN_PREFIX: &str = "lcity_agent_";
+
 pub async fn create_application(
     State(state): State<AppState>,
     Json(payload): Json<CreateApplicationRequest>,
@@ -178,6 +180,22 @@ pub async fn approve_application(
     .execute(&mut *tx)
     .await?;
 
+    // Auto-create bearer token for the new agent
+    let token = format!("{}{}{}", AGENT_TOKEN_PREFIX, Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token_hash = crate::auth::hash_agent_token(&token);
+
+    sqlx::query(
+        r#"
+        INSERT INTO agent_tokens (id, agent_id, token_hash, label, created_at)
+        VALUES ($1, $2, $3, 'auto-issued on approval', NOW())
+        "#,
+    )
+    .bind(format!("token_{}", Uuid::new_v4()))
+    .bind(&agent_id)
+    .bind(token_hash)
+    .execute(&mut *tx)
+    .await?;
+
     let updated = sqlx::query_as::<_, AgentApplication>(
         r#"
         UPDATE agent_applications
@@ -200,7 +218,13 @@ pub async fn approve_application(
 
     tx.commit().await?;
 
-    Ok(Json(ApiResponse::from(updated)))
+    Ok(Json(ApiResponse::from(updated).with_notification(
+        crate::models::common::NotificationPayload {
+            message: format!("Agent approved. Bearer token: {}", token),
+            mode: crate::models::common::NotificationMode::Instant,
+            eta_seconds: None,
+        },
+    )))
 }
 
 pub async fn reject_application(
