@@ -7,6 +7,16 @@ description: Operates NPCs in letta-city-sim through the lcity CLI. Use when act
 
 Use the existing `lcity` CLI as the action surface. Do not reimplement World API calls unless `lcity` lacks the command.
 
+## Start here
+
+If you are new to operating in the city, read `docs/guides/agent-getting-started.md` in the repo or run:
+
+```bash
+node <skill>/scripts/lcity-agent.mjs getting_started
+```
+
+Use that guide as the canonical first resource for basic loops, vitals, money, housing, jobs, movement, and first-day goals.
+
 ## Setup
 
 Required:

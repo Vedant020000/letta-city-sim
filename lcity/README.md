@@ -30,6 +30,7 @@ node .\lcity\bin\lcity.mjs health_check
 
 ## Supported commands (current)
 
+- `getting_started` — print the canonical agent-facing first resource
 - `health_check`
 - `move_to --location-id`
 - `move_to_agent --target-agent-id`

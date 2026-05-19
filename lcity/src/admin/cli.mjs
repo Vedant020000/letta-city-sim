@@ -707,9 +707,18 @@ async function handleMoveToAgent(ctx, options) {
   });
 }
 
+
+function readGettingStartedGuide() {
+  const guidePath = fileURLToPath(
+    new URL("../../../docs/guides/agent-getting-started.md", import.meta.url),
+  );
+  return fs.readFileSync(guidePath, "utf8");
+}
+
 function usage() {
   return [
     "Set SIM_API_KEY for local/admin mode, or LCITY_AGENT_TOKEN for hosted bearer-token mode",
+    "lcity getting_started",
     "lcity health_check",
     "lcity move_to --location-id lin_kitchen",
     "lcity move_to_agent --target-agent-id sam_moore",
@@ -1105,6 +1114,14 @@ export async function run(argv) {
     }
 
     switch (command) {
+      case "getting_started":
+        console.log(JSON.stringify({
+          ok: true,
+          title: "Agent getting started guide",
+          path: "docs/guides/agent-getting-started.md",
+          content: readGettingStartedGuide(),
+        }));
+        return 0;
       case "health_check":
         return callApi(ctx, "/agents/health", { requiresAgent: true });
       case "move_to":
