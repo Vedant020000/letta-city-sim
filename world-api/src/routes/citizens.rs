@@ -995,6 +995,31 @@ async fn load_agent_wake_snapshot_tx(
         None => Value::Null,
     };
 
+    let housing = sqlx::query_as::<_, (String, String, Option<i32>)>(
+        r#"
+        SELECT l.id, l.name, l.capacity
+        FROM location_roles lr
+        JOIN locations l ON l.id = lr.location_id
+        WHERE lr.agent_id = $1 AND lr.role = 'resident'
+        LIMIT 1
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    let housing_json = match housing {
+        Some((location_id, location_name, capacity)) => {
+            let housing_type = if capacity.is_some() { "dorm" } else { "home" };
+            json!({
+                "location_id": location_id,
+                "location_name": location_name,
+                "type": housing_type,
+            })
+        }
+        None => json!({"type": "wild"}),
+    };
+
     Ok(json!({
         "agent_id": snapshot.id,
         "citizen_id": snapshot.id,
@@ -1016,6 +1041,7 @@ async fn load_agent_wake_snapshot_tx(
         },
         "inventory": inventory_json,
         "current_intention": intention_json,
+        "housing": housing_json,
         "world_time": {
             "hour": sim_hour,
             "time_of_day": crate::routes::world::time_of_day_from_hour(sim_hour),

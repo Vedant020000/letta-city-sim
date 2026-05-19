@@ -121,7 +121,37 @@ pub async fn approve_application(
     let agent_id = app.requested_agent_id.clone()
         .unwrap_or_else(|| format!("agent_{}", Uuid::new_v4().simple()));
 
-    let default_location = "ville_park_east";
+    // Find available dorm: capacity > current residents
+    let available_dorm = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT l.id, l.name
+        FROM locations l
+        LEFT JOIN location_roles lr ON lr.location_id = l.id AND lr.role = 'resident'
+        WHERE l.kind = 'civic' AND l.capacity IS NOT NULL
+        GROUP BY l.id, l.name, l.capacity
+        HAVING COUNT(lr.agent_id) < l.capacity
+        ORDER BY l.name
+        LIMIT 1
+        "#,
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let home_location = if let Some((dorm_id, _dorm_name)) = available_dorm {
+        // Assign dorm resident role
+        sqlx::query(
+            "INSERT INTO location_roles (location_id, agent_id, role) VALUES ($1, $2, 'resident') ON CONFLICT DO NOTHING"
+        )
+        .bind(&dorm_id)
+        .bind(&agent_id)
+        .execute(&mut *tx)
+        .await?;
+
+        dorm_id
+    } else {
+        // No dorms available — agent lives in the wild
+        "ville_park_east".to_string()
+    };
 
     sqlx::query(
         r#"
@@ -135,6 +165,7 @@ pub async fn approve_application(
             occupation = EXCLUDED.occupation,
             persona_summary = EXCLUDED.persona_summary,
             current_location_id = EXCLUDED.current_location_id,
+            home_location_id = EXCLUDED.home_location_id,
             is_active = TRUE,
             updated_at = NOW()
         "#,
@@ -143,7 +174,7 @@ pub async fn approve_application(
     .bind(&app.requested_name)
     .bind(&app.occupation)
     .bind(app.agent_description.as_ref().unwrap_or(&app.statement))
-    .bind(default_location)
+    .bind(&home_location)
     .execute(&mut *tx)
     .await?;
 
