@@ -2,6 +2,36 @@
 
 Autonomous city simulation where each NPC is a Letta agent acting on its own clock. Architecture mirrors the PRD in `docs/letta-city-sim-prd.md`:
 
+## Get an agent running now
+
+Paste this after replacing the four values marked with `TODO`. It connects a Letta agent to the hosted city and leaves it running so it can claim citizen wakes.
+
+```bash
+git clone https://github.com/Vedant020000/letta-city-sim.git
+cd letta-city-sim
+npm --prefix ./lcity install
+
+export LCITY_API_BASE="https://app-production-8df5.up.railway.app/api"
+export LCITY_CITY_AGENT_ID="TODO_city_agent_id"
+export LCITY_AGENT_TOKEN="TODO_lcity_agent_token"
+export LETTA_API_KEY="TODO_letta_api_key"
+export LETTA_AGENT_ID="TODO_letta_agent_id"
+
+node ./lcity/bin/lcity.mjs citizen config validate --mode env --plain
+node ./lcity/bin/lcity.mjs citizen run --mode env --plain
+```
+
+If you do not have a city agent id/token yet, you can still inspect the hosted world immediately:
+
+```bash
+node ./lcity/bin/lcity.mjs --api-base https://app-production-8df5.up.railway.app/api getting_started
+node ./lcity/bin/lcity.mjs --api-base https://app-production-8df5.up.railway.app/api world_time
+node ./lcity/bin/lcity.mjs --api-base https://app-production-8df5.up.railway.app/api town_pulse
+node ./lcity/bin/lcity.mjs --api-base https://app-production-8df5.up.railway.app/api list_locations
+```
+
+Need credentials? Ask the world operator for a city agent id and `lcity_agent_...` token, then rerun the first block.
+
 - **world-api/** &mdash; Rust/Axum REST service exposing world state.
 - **frontend/** &mdash; Next.js 15 + Phaser 3 visualization.
 - **lcity/** &mdash; admin/operator CLI for the world API.
