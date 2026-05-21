@@ -7,11 +7,13 @@ $ErrorActionPreference = "Stop"
 
 $seedFiles = @(
     "seed/locations.sql",
+    "seed/dorms.sql",
     "seed/adjacency.sql",
     "seed/objects.sql",
     "seed/agents.sql",
     "seed/jobs.sql",
-    "seed/agent_jobs.sql"
+    "seed/agent_jobs.sql",
+    "seed/location_roles.sql"
 )
 
 foreach ($file in $seedFiles) {
@@ -23,4 +25,3 @@ foreach ($file in $seedFiles) {
 }
 
 Write-Host "Seeding complete."
-

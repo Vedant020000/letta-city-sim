@@ -70,6 +70,17 @@ VALUES
   ('smallville_bank_office', 'smallville_bank_vault', 6),
   ('smallville_bank_vault', 'smallville_bank_office', 6),
   ('smallville_bank_lobby', 'harvey_oak_entrance', 80),
-  ('harvey_oak_entrance', 'smallville_bank_lobby', 80)
+  ('harvey_oak_entrance', 'smallville_bank_lobby', 80),
+  -- Housing fallback and temporary lodging
+  ('ville_park_east', 'smallville_campground', 80),
+  ('smallville_campground', 'ville_park_east', 80),
+  ('miller_community_garden', 'smallville_campground', 60),
+  ('smallville_campground', 'miller_community_garden', 60),
+  ('harvey_oak_entrance', 'smallville_motel_lobby', 45),
+  ('smallville_motel_lobby', 'harvey_oak_entrance', 45),
+  ('notice_board', 'smallville_motel_lobby', 70),
+  ('smallville_motel_lobby', 'notice_board', 70),
+  ('smallville_motel_lobby', 'smallville_motel_room', 8),
+  ('smallville_motel_room', 'smallville_motel_lobby', 8)
 ON CONFLICT (from_id, to_id) DO UPDATE
 SET travel_secs = EXCLUDED.travel_secs;

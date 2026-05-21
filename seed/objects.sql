@@ -15,7 +15,9 @@ VALUES
   ('delivery_crate_hobbs', 'Delivery Crate', 'hobbs_cafe_kitchen', '{"delivery_pending": false}', ARRAY['receive']),
   ('bank_teller_counter', 'Bank Teller Counter', 'smallville_bank_lobby', '{"open": true}', ARRAY['deposit', 'withdraw', 'loan']),
   ('bank_rate_board', 'Bank Rate Board', 'smallville_bank_lobby', '{"posted": true}', ARRAY['read']),
-  ('bank_vault_door', 'Bank Vault Door', 'smallville_bank_vault', '{"locked": true}', ARRAY['inspect'])
+  ('bank_vault_door', 'Bank Vault Door', 'smallville_bank_vault', '{"locked": true}', ARRAY['inspect']),
+  ('tent_site_campground', 'Campground Tent Site', 'smallville_campground', '{"occupied_by": null, "shared_sleep_site": true, "housing_tier": "campground", "sleep_recovery_per_min": 1.0, "stamina_recovery_per_min": 0.4, "nightly_price_cents": 0}', ARRAY['sleep', 'rest']),
+  ('bed_smallville_motel_room', 'Smallville Motel Bed', 'smallville_motel_room', '{"occupied_by": null, "housing_tier": "motel", "sleep_recovery_per_min": 2.0, "stamina_recovery_per_min": 0.7, "nightly_price_cents": 2500}', ARRAY['sleep'])
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     location_id = EXCLUDED.location_id,
