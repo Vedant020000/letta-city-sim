@@ -151,8 +151,8 @@ pub async fn approve_application(
 
         dorm_id
     } else {
-        // No dorms available — agent lives in the wild
-        "ville_park_east".to_string()
+        // No dorms available — agent starts at the free campground fallback.
+        "smallville_campground".to_string()
     };
 
     sqlx::query(

@@ -24,7 +24,10 @@ VALUES
   ('townhall_voting_booth', 'Voting Booth', 'A small booth where citizens cast their ballots for mayor.', 608, 304, 'civic'),
   ('smallville_bank_lobby', 'Smallville Bank Lobby', 'A quiet bank lobby with teller windows, a posted rate board, and polished stone floors.', 416, 352, 'workplace'),
   ('smallville_bank_office', 'Smallville Bank Office', 'A private office where the banker reviews balances, rates, and loan requests.', 416, 320, 'workplace'),
-  ('smallville_bank_vault', 'Smallville Bank Vault', 'A secured vault room holding the town bank reserves and ledgers.', 384, 320, 'workplace')
+  ('smallville_bank_vault', 'Smallville Bank Vault', 'A secured vault room holding the town bank reserves and ledgers.', 384, 320, 'workplace'),
+  ('smallville_campground', 'Smallville Campground', 'A free public campground with simple tent sites near the park. It is safe, but not especially restful.', 800, 512, 'public'),
+  ('smallville_motel_lobby', 'Smallville Motel Lobby', 'A modest motel lobby with a front desk, room keys, and posted nightly rates.', 448, 512, 'business'),
+  ('smallville_motel_room', 'Smallville Motel Room', 'A clean temporary room with a made bed and thin curtains. It costs money, but sleeps better than the campground.', 480, 512, 'business')
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     description = EXCLUDED.description,

@@ -3982,7 +3982,7 @@ fn tool_look_around() -> WorldToolDefinition {
 fn tool_sleep() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "sleep".to_string(),
-        description: "Go to sleep if the current location has a valid bed.".to_string(),
+        description: "Go to sleep if the current location has a valid bed. Recovery depends on housing tier; motel beds cost money, campground sleep is free but weak.".to_string(),
         endpoint: "/actions/sleep".to_string(),
         method: "POST".to_string(),
         parameters: json!({
@@ -3996,7 +3996,7 @@ fn tool_sleep() -> WorldToolDefinition {
 fn tool_wake_up() -> WorldToolDefinition {
     WorldToolDefinition {
         name: "wake_up".to_string(),
-        description: "Wake up from sleep. Your sleep_level will have recovered while you were sleeping.".to_string(),
+        description: "Wake up from sleep. The response explains sleep and stamina recovery from the housing tier you used.".to_string(),
         endpoint: "/actions/wake_up".to_string(),
         method: "POST".to_string(),
         parameters: json!({

@@ -64,11 +64,17 @@ apply_seed_file() {
 
 apply_seeds() {
   apply_seed_file "$SEED_DIR/locations.sql"
+  if [ -f "$SEED_DIR/dorms.sql" ]; then
+    apply_seed_file "$SEED_DIR/dorms.sql"
+  fi
   apply_seed_file "$SEED_DIR/adjacency.sql"
   apply_seed_file "$SEED_DIR/objects.sql"
   apply_seed_file "$SEED_DIR/agents.sql"
   apply_seed_file "$SEED_DIR/jobs.sql"
   apply_seed_file "$SEED_DIR/agent_jobs.sql"
+  if [ -f "$SEED_DIR/location_roles.sql" ]; then
+    apply_seed_file "$SEED_DIR/location_roles.sql"
+  fi
   if [ -f "$SEED_DIR/shops.sql" ]; then
     apply_seed_file "$SEED_DIR/shops.sql"
   fi

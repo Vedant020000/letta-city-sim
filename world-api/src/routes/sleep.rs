@@ -8,6 +8,7 @@ use crate::models::agent::Agent;
 use crate::models::common::{ApiResponse, NotificationMode, NotificationPayload};
 use crate::models::object::WorldObject;
 use crate::routes::citizens::enqueue_citizen_wake_tx;
+use crate::routes::vitals::SleepRecoveryPlan;
 use crate::state::AppState;
 use crate::ws_events::WorldEventEnvelope;
 
@@ -23,6 +24,24 @@ fn occupied_by(state: &Value) -> Option<String> {
         .get("occupied_by")
         .and_then(|value| value.as_str())
         .map(|value| value.to_string())
+}
+
+fn is_shared_sleep_site(state: &Value) -> bool {
+    state
+        .get("shared_sleep_site")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn format_cents(cents: i64) -> String {
+    format!("${:.2}", cents as f64 / 100.0)
+}
+
+fn recovery_reason(plan: &SleepRecoveryPlan) -> String {
+    format!(
+        "{} recovery: +{:.1} sleep/min, +{:.1} stamina/min",
+        plan.label, plan.sleep_recovery_per_min, plan.stamina_recovery_per_min
+    )
 }
 
 async fn location_targets(
@@ -108,7 +127,10 @@ pub async fn start_sleep(
         }
     };
 
-    if let Some(current_occupant) = occupied_by(&bed.state)
+    let shared_sleep_site = is_shared_sleep_site(&bed.state);
+
+    if !shared_sleep_site
+        && let Some(current_occupant) = occupied_by(&bed.state)
         && current_occupant != agent.id
     {
         return Err(AppError::BadRequest(format!(
@@ -117,8 +139,76 @@ pub async fn start_sleep(
         )));
     }
 
+    let sleep_plan = crate::routes::vitals::sleep_recovery_plan_for_bed_tx(
+        &mut tx,
+        &agent.id,
+        bed.location_id.as_deref(),
+        &bed.state,
+    )
+    .await?;
+
+    let mut sleep_cost_cents = 0_i64;
+    let mut post_payment_balance = agent.balance_cents;
+    if sleep_plan.cost_cents > 0 {
+        if agent.balance_cents < sleep_plan.cost_cents {
+            return Err(AppError::BadRequest(format!(
+                "insufficient balance for {} (have {}, need {}); try the campground fallback",
+                sleep_plan.label,
+                format_cents(agent.balance_cents),
+                format_cents(sleep_plan.cost_cents)
+            )));
+        }
+
+        post_payment_balance = sqlx::query_scalar::<_, i64>(
+            r#"
+            UPDATE agents
+            SET balance_cents = balance_cents - $1,
+                last_expense_cents = $1,
+                last_expense_reason = $2,
+                last_expense_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $3 AND balance_cents >= $1
+            RETURNING balance_cents
+            "#,
+        )
+        .bind(sleep_plan.cost_cents)
+        .bind(format!("{} lodging", sleep_plan.label))
+        .bind(&agent.id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            AppError::BadRequest(format!(
+                "insufficient balance for {} (need {})",
+                sleep_plan.label,
+                format_cents(sleep_plan.cost_cents)
+            ))
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO economy_transactions (
+                from_agent_id, to_agent_id, amount_cents, reason,
+                transaction_type, status, location_id, resolved_at
+            )
+            VALUES ($1, NULL, $2, $3, 'payment', 'completed', $4, NOW())
+            "#,
+        )
+        .bind(&agent.id)
+        .bind(sleep_plan.cost_cents)
+        .bind(format!("{} lodging", sleep_plan.label))
+        .bind(&agent.current_location_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sleep_cost_cents = sleep_plan.cost_cents;
+    }
+
     let mut bed_state = normalize_bed_state(&bed.state);
-    bed_state.insert("occupied_by".to_string(), Value::String(agent.id.clone()));
+    if shared_sleep_site {
+        bed_state.insert("last_used_by".to_string(), Value::String(agent.id.clone()));
+    } else {
+        bed_state.insert("occupied_by".to_string(), Value::String(agent.id.clone()));
+    }
 
     sqlx::query(
         r#"
@@ -162,6 +252,13 @@ pub async fn start_sleep(
             "agent_id": agent.id,
             "bed_id": bed.id,
             "location_id": agent.current_location_id,
+            "housing_tier": &sleep_plan.tier,
+            "recovery_reason": recovery_reason(&sleep_plan),
+            "sleep_recovery_per_min": sleep_plan.sleep_recovery_per_min,
+            "stamina_recovery_per_min": sleep_plan.stamina_recovery_per_min,
+            "cost_cents": sleep_cost_cents,
+            "balance_cents": post_payment_balance,
+            "shared_sleep_site": shared_sleep_site,
         })
         .to_string(),
     )
@@ -172,7 +269,10 @@ pub async fn start_sleep(
     let targets = location_targets(&mut tx, &agent.current_location_id, &agent.id).await?;
     let mut citizen_signal_targets = Vec::new();
 
-    for target_agent_id in targets.iter().filter(|target| target.as_str() != agent.id.as_str()) {
+    for target_agent_id in targets
+        .iter()
+        .filter(|target| target.as_str() != agent.id.as_str())
+    {
         let enqueued = enqueue_citizen_wake_tx(
             &mut tx,
             target_agent_id,
@@ -184,6 +284,10 @@ pub async fn start_sleep(
                     "agent_id": agent.id,
                     "bed_id": bed.id,
                     "location_id": agent.current_location_id,
+                    "housing_tier": &sleep_plan.tier,
+                    "recovery_reason": recovery_reason(&sleep_plan),
+                    "cost_cents": sleep_cost_cents,
+                    "shared_sleep_site": shared_sleep_site,
                 }
             }),
             format!("{} just went to sleep.", agent.name),
@@ -194,6 +298,10 @@ pub async fn start_sleep(
                 "bed_id": bed.id,
                 "bed_name": bed.name,
                 "location_id": agent.current_location_id,
+                "housing_tier": &sleep_plan.tier,
+                "recovery_reason": recovery_reason(&sleep_plan),
+                "cost_cents": sleep_cost_cents,
+                "shared_sleep_site": shared_sleep_site,
             }),
             json!([]),
             true,
@@ -230,13 +338,28 @@ pub async fn start_sleep(
             "agent_id": updated_agent.id,
             "bed_id": bed.id,
             "location_id": updated_agent.current_location_id,
+            "housing_tier": &sleep_plan.tier,
+            "recovery_reason": recovery_reason(&sleep_plan),
+            "cost_cents": sleep_cost_cents,
+            "shared_sleep_site": shared_sleep_site,
         }),
     ));
+
+    let payment_prefix = if sleep_cost_cents > 0 {
+        format!("Paid {} and ", format_cents(sleep_cost_cents))
+    } else {
+        String::new()
+    };
 
     Ok(Json(ApiResponse {
         data: updated_agent,
         notification: Some(NotificationPayload {
-            message: format!("Went to sleep in {}.", bed.name),
+            message: format!(
+                "{}went to sleep in {}. {}.",
+                payment_prefix,
+                bed.name,
+                recovery_reason(&sleep_plan)
+            ),
             mode: NotificationMode::Instant,
             eta_seconds: None,
         }),
@@ -268,9 +391,6 @@ pub async fn wake_up(
         ));
     }
 
-    // Apply sleep recovery (sleep_level recovers, other vitals still decay)
-    let agent = crate::routes::vitals::apply_sleep_recovery_tx(&mut tx, &agent_id).await?;
-
     let occupied_beds = sqlx::query_as::<_, WorldObject>(
         r#"
         SELECT id, name, location_id, state, actions
@@ -283,6 +403,38 @@ pub async fn wake_up(
     .bind(&agent.id)
     .fetch_all(&mut *tx)
     .await?;
+
+    let empty_state = Value::Null;
+    let sleep_plan = match occupied_beds.first() {
+        Some(bed) => {
+            crate::routes::vitals::sleep_recovery_plan_for_bed_tx(
+                &mut tx,
+                &agent.id,
+                bed.location_id.as_deref(),
+                &bed.state,
+            )
+            .await?
+        }
+        None => {
+            crate::routes::vitals::sleep_recovery_plan_for_bed_tx(
+                &mut tx,
+                &agent.id,
+                Some(&agent.current_location_id),
+                &empty_state,
+            )
+            .await?
+        }
+    };
+
+    let sleep_before = agent.sleep_level;
+    let stamina_before = agent.stamina_level;
+
+    let agent =
+        crate::routes::vitals::apply_sleep_recovery_with_plan_tx(&mut tx, &agent_id, &sleep_plan)
+            .await?;
+
+    let sleep_delta = agent.sleep_level - sleep_before;
+    let stamina_delta = agent.stamina_level - stamina_before;
 
     for bed in &occupied_beds {
         let mut bed_state = normalize_bed_state(&bed.state);
@@ -333,6 +485,12 @@ pub async fn wake_up(
             "agent_id": agent.id,
             "bed_id": bed_id,
             "location_id": agent.current_location_id,
+            "housing_tier": &sleep_plan.tier,
+            "recovery_reason": recovery_reason(&sleep_plan),
+            "sleep_recovery_per_min": sleep_plan.sleep_recovery_per_min,
+            "stamina_recovery_per_min": sleep_plan.stamina_recovery_per_min,
+            "sleep_delta": sleep_delta,
+            "stamina_delta": stamina_delta,
         })
         .to_string(),
     )
@@ -343,7 +501,10 @@ pub async fn wake_up(
     let targets = location_targets(&mut tx, &agent.current_location_id, &agent.id).await?;
     let mut citizen_signal_targets = Vec::new();
 
-    for target_agent_id in targets.iter().filter(|target| target.as_str() != agent.id.as_str()) {
+    for target_agent_id in targets
+        .iter()
+        .filter(|target| target.as_str() != agent.id.as_str())
+    {
         let enqueued = enqueue_citizen_wake_tx(
             &mut tx,
             target_agent_id,
@@ -355,6 +516,10 @@ pub async fn wake_up(
                     "agent_id": agent.id,
                     "bed_id": bed_id,
                     "location_id": agent.current_location_id,
+                    "housing_tier": &sleep_plan.tier,
+                    "recovery_reason": recovery_reason(&sleep_plan),
+                    "sleep_delta": sleep_delta,
+                    "stamina_delta": stamina_delta,
                 }
             }),
             format!("{} just woke up.", agent.name),
@@ -364,6 +529,10 @@ pub async fn wake_up(
                 "agent_name": agent.name,
                 "bed_id": bed_id,
                 "location_id": agent.current_location_id,
+                "housing_tier": &sleep_plan.tier,
+                "recovery_reason": recovery_reason(&sleep_plan),
+                "sleep_delta": sleep_delta,
+                "stamina_delta": stamina_delta,
             }),
             json!([]),
             true,
@@ -400,13 +569,23 @@ pub async fn wake_up(
             "agent_id": updated_agent.id,
             "bed_id": bed_id,
             "location_id": updated_agent.current_location_id,
+            "housing_tier": &sleep_plan.tier,
+            "recovery_reason": recovery_reason(&sleep_plan),
+            "sleep_delta": sleep_delta,
+            "stamina_delta": stamina_delta,
         }),
     ));
 
     Ok(Json(ApiResponse {
         data: updated_agent,
         notification: Some(NotificationPayload {
-            message: "Woke up and returned to idle.".to_string(),
+            message: format!(
+                "Woke up after {} sleep: sleep {:+}, stamina {:+}. {}.",
+                sleep_plan.label,
+                sleep_delta,
+                stamina_delta,
+                recovery_reason(&sleep_plan)
+            ),
             mode: NotificationMode::Instant,
             eta_seconds: None,
         }),
