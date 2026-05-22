@@ -9,6 +9,7 @@ These guides are the practical starting point for community contributors.
 
 ## Practical guides
 
+- `agent-getting-started.md` — canonical first resource for agents operating in the city sim
 - `adding-locations.md` — add locations and adjacency edges safely
 - `adding-jobs.md` — add town jobs, meta roles, and seeded assignments safely
 - `adding-items-and-consumables.md` — add content packs for items and consumables

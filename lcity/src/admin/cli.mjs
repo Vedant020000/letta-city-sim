@@ -151,6 +151,7 @@ function parseCli(argv) {
     || "http://localhost:3001";
   const ctx = {
     apiBase: defaultApiBase,
+    agentId: process.env.LCITY_AGENT_ID || "",
     agentIdFile: path.join(".lcity", "agent_id"),
     agentToken: process.env.LCITY_AGENT_TOKEN || "",
     agentTokenFile: process.env.LCITY_AGENT_TOKEN_FILE || path.join(".lcity", "agent_token"),
@@ -164,6 +165,7 @@ function parseCli(argv) {
   while (tokens.length > 0 && tokens[0].startsWith("--")) {
     const token = tokens.shift();
     if (token === "--api-base") ctx.apiBase = tokens.shift() || ctx.apiBase;
+    if (token === "--agent-id") ctx.agentId = tokens.shift() || ctx.agentId;
     if (token === "--agent-id-file") ctx.agentIdFile = tokens.shift() || ctx.agentIdFile;
     if (token === "--agent-token") ctx.agentToken = tokens.shift() || ctx.agentToken;
     if (token === "--agent-token-file") ctx.agentTokenFile = tokens.shift() || ctx.agentTokenFile;
@@ -202,9 +204,16 @@ function required(options, key) {
   return String(value).trim();
 }
 
-function resolveAgentId(agentIdFile) {
+function resolveAgentId(ctxOrAgentIdFile) {
+  if (ctxOrAgentIdFile && typeof ctxOrAgentIdFile === "object") {
+    const inlineAgentId = String(ctxOrAgentIdFile.agentId || "").trim();
+    if (inlineAgentId) return inlineAgentId;
+    return resolveAgentId(ctxOrAgentIdFile.agentIdFile);
+  }
+
+  const agentIdFile = ctxOrAgentIdFile;
   if (!fs.existsSync(agentIdFile)) {
-    throw new Error("missing ./.lcity/agent_id (or pass --agent-id-file)");
+    throw new Error("missing agent id (pass --agent-id, set LCITY_AGENT_ID, or create ./.lcity/agent_id)");
   }
   try {
     const value = fs.readFileSync(agentIdFile, "utf8").trim();
@@ -221,7 +230,7 @@ function resolveTargetAgentId(ctx, options) {
     return String(override).trim();
   }
 
-  return resolveAgentId(ctx.agentIdFile);
+  return resolveAgentId(ctx);
 }
 
 function buildJobAssignmentBody(options) {
@@ -268,7 +277,7 @@ function buildAuthHeaders(ctx, { requiresAgent = false, requireSimKey = true, us
     headers["x-sim-key"] = resolveSimKey(ctx.simKey);
   }
   if (requiresAgent) {
-    headers["x-agent-id"] = resolveAgentId(ctx.agentIdFile);
+    headers["x-agent-id"] = resolveAgentId(ctx);
   }
 
   return headers;
@@ -389,7 +398,7 @@ async function notifyDaemon(ctx, { message, agentId }) {
 
   const resolvedAgentId = agentId && String(agentId).trim()
     ? String(agentId).trim()
-    : resolveAgentId(ctx.agentIdFile);
+    : resolveAgentId(ctx);
 
   const url = `http://127.0.0.1:${ctx.daemonPort}/notify`;
   const payload = {
@@ -464,7 +473,7 @@ function registerToken(ctx, options) {
 }
 
 async function currentIntentionId(ctx) {
-  const agentId = resolveAgentId(ctx.agentIdFile);
+  const agentId = resolveAgentId(ctx);
   const response = await requestJson(
     `${ctx.apiBase.replace(/\/$/, "")}/agents/${encodeURIComponent(agentId)}/intentions/current`,
     { headers: buildAuthHeaders(ctx) },
@@ -482,7 +491,7 @@ async function currentIntentionId(ctx) {
 }
 
 async function updateIntentionStatus(ctx, options, status) {
-  const agentId = resolveAgentId(ctx.agentIdFile);
+  const agentId = resolveAgentId(ctx);
   const intentionId = options["intention-id"]
     ? String(options["intention-id"]).trim()
     : await currentIntentionId(ctx);
@@ -497,6 +506,11 @@ const COMMANDS = {
   health_check: {
     route: "/agents/health",
     requiresAgent: true,
+    requireSimKey: false,
+  },
+  agent_state: {
+    route: (ctx) => `/agents/${encodeURIComponent(resolveAgentId(ctx))}`,
+    requireSimKey: false,
   },
   move_to: {
     route: "/agents/move",
@@ -511,14 +525,17 @@ const COMMANDS = {
   },
   list_locations: {
     route: "/locations",
+    requireSimKey: false,
   },
   get_location: {
     route: (_ctx, options) =>
       `/locations/${encodeURIComponent(required(options, "id"))}`,
+    requireSimKey: false,
   },
   nearby_locations: {
     route: (_ctx, options) =>
       `/locations/${encodeURIComponent(required(options, "id"))}/nearby`,
+    requireSimKey: false,
   },
   pathfind: {
     route: (_ctx, options) => {
@@ -526,27 +543,30 @@ const COMMANDS = {
       const to = encodeURIComponent(required(options, "to"));
       return `/pathfind?from=${from}&to=${to}`;
     },
+    requireSimKey: false,
   },
-    world_time: {
-      route: "/world/time",
-    },
+  world_time: {
+    route: "/world/time",
+    requireSimKey: false,
+  },
   town_pulse: {
     route: "/town/pulse",
     requireSimKey: false,
   },
-    sleep: {
-      route: "/agents/sleep",
-      method: "POST",
-      requiresAgent: true,
-    },
-    wake_up: {
-      route: "/agents/sleep",
-      method: "DELETE",
-      requiresAgent: true,
-    },
-    list_inventory: {
-      route: (ctx) =>
-        `/inventory/${encodeURIComponent(resolveAgentId(ctx.agentIdFile))}`,
+  sleep: {
+    route: "/agents/sleep",
+    method: "POST",
+    requiresAgent: true,
+  },
+  wake_up: {
+    route: "/agents/sleep",
+    method: "DELETE",
+    requiresAgent: true,
+  },
+  list_inventory: {
+    route: (ctx) =>
+      `/inventory/${encodeURIComponent(resolveAgentId(ctx))}`,
+    requireSimKey: false,
   },
   list_jobs: {
     route: "/jobs",
@@ -580,9 +600,11 @@ const COMMANDS = {
   },
   board_read: {
     route: "/board",
+    requireSimKey: false,
   },
   board_posts: {
     route: "/board/posts",
+    requireSimKey: false,
   },
   board_post: {
     route: "/board/posts",
@@ -613,7 +635,7 @@ const COMMANDS = {
     }),
   },
   economy_update: {
-    route: (ctx) => `/agents/${encodeURIComponent(resolveAgentId(ctx.agentIdFile))}/economy`,
+    route: (ctx) => `/agents/${encodeURIComponent(resolveAgentId(ctx))}/economy`,
     method: "PATCH",
     buildBody: (options) => ({
       amount_cents: parseInt(required(options, "amount-cents"), 10),
@@ -643,6 +665,7 @@ const COMMANDS = {
   whoami: {
     route: "/agents/health",
     requiresAgent: true,
+    requireSimKey: false,
   },
 };
 
@@ -707,10 +730,21 @@ async function handleMoveToAgent(ctx, options) {
   });
 }
 
+
+function readGettingStartedGuide() {
+  const guidePath = fileURLToPath(
+    new URL("../../../docs/guides/agent-getting-started.md", import.meta.url),
+  );
+  return fs.readFileSync(guidePath, "utf8");
+}
+
 function usage() {
   return [
     "Set SIM_API_KEY for local/admin mode, or LCITY_AGENT_TOKEN for hosted bearer-token mode",
+    "Global flags: --api-base <url> [--agent-id <id>|--agent-id-file <path>] [--sim-key <key>|--agent-token <token>]",
+    "lcity getting_started",
     "lcity health_check",
+    "lcity agent_state",
     "lcity move_to --location-id lin_kitchen",
     "lcity move_to_agent --target-agent-id sam_moore",
     "lcity list_locations",
@@ -1098,6 +1132,9 @@ async function daemonRun(ctx, options) {
 export async function run(argv) {
   try {
     const { ctx, command, options } = parseCli(argv);
+    if (options["agent-id"] && String(options["agent-id"]).trim()) {
+      ctx.agentId = String(options["agent-id"]).trim();
+    }
 
     if (!command || command === "help" || command === "--help") {
       console.log(JSON.stringify({ ok: true, usage: usage() }));
@@ -1105,8 +1142,20 @@ export async function run(argv) {
     }
 
     switch (command) {
+      case "getting_started":
+        console.log(JSON.stringify({
+          ok: true,
+          title: "Agent getting started guide",
+          path: "docs/guides/agent-getting-started.md",
+          content: readGettingStartedGuide(),
+        }));
+        return 0;
       case "health_check":
-        return callApi(ctx, "/agents/health", { requiresAgent: true });
+        return callApi(ctx, "/agents/health", { requiresAgent: true, requireSimKey: false });
+      case "agent_state": {
+        const agentId = resolveAgentId(ctx);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}`, { requireSimKey: false });
+      }
       case "move_to":
         return callApi(ctx, "/agents/move", {
           method: "PATCH",
@@ -1144,23 +1193,23 @@ export async function run(argv) {
         });
       }
       case "list_locations":
-        return callApi(ctx, "/locations");
+        return callApi(ctx, "/locations", { requireSimKey: false });
       case "get_location":
-        return callApi(ctx, `/locations/${encodeURIComponent(required(options, "id"))}`);
+        return callApi(ctx, `/locations/${encodeURIComponent(required(options, "id"))}`, { requireSimKey: false });
       case "nearby_locations":
-        return callApi(ctx, `/locations/${encodeURIComponent(required(options, "id"))}/nearby`);
+        return callApi(ctx, `/locations/${encodeURIComponent(required(options, "id"))}/nearby`, { requireSimKey: false });
       case "pathfind": {
         const from = encodeURIComponent(required(options, "from"));
         const to = encodeURIComponent(required(options, "to"));
-        return callApi(ctx, `/pathfind?from=${from}&to=${to}`);
+        return callApi(ctx, `/pathfind?from=${from}&to=${to}`, { requireSimKey: false });
       }
       case "world_time":
-        return callApi(ctx, "/world/time");
+        return callApi(ctx, "/world/time", { requireSimKey: false });
       case "town_pulse":
         return callApi(ctx, "/town/pulse", { requireSimKey: false });
       case "list_inventory": {
-        const agentId = resolveAgentId(ctx.agentIdFile);
-        return callApi(ctx, `/inventory/${encodeURIComponent(agentId)}`);
+        const agentId = resolveAgentId(ctx);
+        return callApi(ctx, `/inventory/${encodeURIComponent(agentId)}`, { requireSimKey: false });
       }
       case "list_jobs":
         return callApi(ctx, "/jobs", { requireSimKey: false });
@@ -1192,9 +1241,9 @@ export async function run(argv) {
         });
       }
       case "board_read":
-        return callApi(ctx, "/board");
+        return callApi(ctx, "/board", { requireSimKey: false });
       case "board_posts":
-        return callApi(ctx, "/board/posts");
+        return callApi(ctx, "/board/posts", { requireSimKey: false });
       case "board_post":
         return callApi(ctx, "/board/posts", {
           method: "PATCH",
@@ -1226,17 +1275,17 @@ export async function run(argv) {
       case "register_token":
         return registerToken(ctx, options);
       case "whoami":
-        return callApi(ctx, "/agents/health", { requiresAgent: true });
+        return callApi(ctx, "/agents/health", { requiresAgent: true, requireSimKey: false });
       case "current_intention": {
-        const agentId = resolveAgentId(ctx.agentIdFile);
-        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions/current`);
+        const agentId = resolveAgentId(ctx);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions/current`, { requireSimKey: false });
       }
       case "list_intentions": {
-        const agentId = resolveAgentId(ctx.agentIdFile);
-        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions`);
+        const agentId = resolveAgentId(ctx);
+        return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions`, { requireSimKey: false });
       }
       case "set_intention": {
-        const agentId = resolveAgentId(ctx.agentIdFile);
+        const agentId = resolveAgentId(ctx);
         return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions`, {
           method: "POST",
           body: {
@@ -1247,7 +1296,7 @@ export async function run(argv) {
         });
       }
       case "update_intention": {
-        const agentId = resolveAgentId(ctx.agentIdFile);
+        const agentId = resolveAgentId(ctx);
         const intentionId = required(options, "intention-id");
         return callApi(ctx, `/agents/${encodeURIComponent(agentId)}/intentions/${encodeURIComponent(intentionId)}`, {
           method: "PATCH",
