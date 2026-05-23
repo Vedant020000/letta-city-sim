@@ -2,6 +2,7 @@ pub mod agent;
 pub mod application;
 pub mod board;
 pub mod common;
+pub mod construction;
 pub mod conversation;
 pub mod event;
 pub mod intention;

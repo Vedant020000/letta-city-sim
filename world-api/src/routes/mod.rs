@@ -4,6 +4,7 @@ pub mod applications;
 pub mod banking;
 pub mod board;
 pub mod citizens;
+pub mod construction;
 pub mod conversations;
 pub mod economy;
 pub mod events;

@@ -42,6 +42,7 @@ use routes::actions::{
     action_speak_to, action_transfer_item, action_use_item, action_wake_up, get_tool_manifest,
 };
 use routes::applications::{create_application, get_application, list_applications, approve_application, reject_application, get_admin_application};
+use routes::construction::{start_home_project, fund_home_project, hire_builder, check_home_project, list_construction_companies};
 use routes::banking::{
     action_check_bank_account, action_check_bank_balance_sheet, action_check_bank_rates,
     action_check_bank_trends, action_check_rate_policy_context, action_explain_bank_policy,
@@ -215,6 +216,11 @@ async fn main() -> AppResult<()> {
         .route("/admin/applications/:id", get(get_admin_application))
         .route("/admin/applications/:id/approve", post(approve_application))
         .route("/admin/applications/:id/reject", post(reject_application))
+        .route("/construction/companies", get(list_construction_companies))
+        .route("/actions/start_home_project", post(start_home_project))
+        .route("/actions/fund_home_project", post(fund_home_project))
+        .route("/actions/hire_builder", post(hire_builder))
+        .route("/actions/check_home_project", post(check_home_project))
         .route("/admin/agents/:id/tokens", get(list_agent_tokens))
         .route("/admin/agents/:id/tokens", post(create_agent_token))
         .route(

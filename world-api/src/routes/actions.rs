@@ -3081,8 +3081,12 @@ fn has_water_access(location_id: &str) -> bool {
 }
 
 /// Helper: check if location is a home (for shower/get_ready)
+/// Helper: check if location is a home-kind location (where agent has owner or resident role)
 fn is_home_location(location_id: &str) -> bool {
-    location_id.starts_with("lin_")
+    // Matches any location with kind='home' — covers both seeded and built homes
+    // The Lin family home locations are seeded with kind='home'
+    // Agent-built homes are also kind='home'
+    location_id.starts_with("lin_") || location_id.starts_with("home_")
 }
 
 /// Helper: check if location allows bathing/swimming
@@ -3912,6 +3916,48 @@ pub async fn get_tool_manifest(
         tools.push(tool_bathe());
         tools.push(tool_swim());
     }
+
+    // Construction tools — based on project state
+    let has_active_project = sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(SELECT 1 FROM construction_projects WHERE agent_id = $1 AND status != 'complete')"#,
+    )
+    .bind(&agent_row.0)
+    .fetch_one(state.pool())
+    .await?;
+
+    if !has_active_project {
+        tools.push(tool_start_home_project());
+    } else {
+        // Check specific project status for conditional tools
+        let project_status = sqlx::query_scalar::<_, String>(
+            r#"SELECT status FROM construction_projects WHERE agent_id = $1 AND status != 'complete' LIMIT 1"#,
+        )
+        .bind(&agent_row.0)
+        .fetch_optional(state.pool())
+        .await?;
+
+        match project_status.as_deref() {
+            Some("planning") => {
+                tools.push(tool_fund_home_project());
+            }
+            Some("funding") => {
+                tools.push(tool_fund_home_project());
+                tools.push(tool_hire_builder());
+            }
+            Some("building") => {
+                tools.push(tool_check_home_project());
+            }
+            _ => {}
+        }
+
+        // check_home_project is always available if there's any active project
+        if has_active_project {
+            tools.push(tool_check_home_project());
+        }
+    }
+
+    // List construction companies is always available
+    tools.push(tool_list_construction_companies());
 
 
     Ok(Json(ApiResponse::from(ToolManifestResponse {
@@ -5164,6 +5210,91 @@ fn tool_get_intention() -> WorldToolDefinition {
         description: "Get your current active intention, including the summary, reason, expected location, and expected action. Returns null if you have no active intention.".to_string(),
         endpoint: "/actions/get_intention".to_string(),
         method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
+fn tool_start_home_project() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "start_home_project".to_string(),
+        description: "Start a home construction project. Costs 5000 cents total to fund. You can pay in installments. Once fully funded, hire a builder from Smallville Construction Co. to begin building. Owned homes give the best sleep recovery.".to_string(),
+        endpoint: "/actions/start_home_project".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "location_name": {
+                    "type": "string",
+                    "description": "A name for your new home (e.g., 'Cozy Cottage', 'Eddy's Place')."
+                }
+            },
+            "required": ["location_name"]
+        }),
+    }
+}
+
+fn tool_fund_home_project() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "fund_home_project".to_string(),
+        description: "Pay toward your home construction project. You can pay any amount up to the remaining cost. Once fully funded (5000 cents), you can hire a builder. If you don't have enough money, consider taking a loan from the bank.".to_string(),
+        endpoint: "/actions/fund_home_project".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "amount_cents": {
+                    "type": "integer",
+                    "description": "Amount to pay in cents. Can pay in installments or all at once."
+                }
+            },
+            "required": ["amount_cents"]
+        }),
+    }
+}
+
+fn tool_hire_builder() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "hire_builder".to_string(),
+        description: "Hire a construction company to build your home. Requires the project to be fully funded. The hiring fee is deducted from your balance. Once hired, builders work automatically — check progress with check_home_project.".to_string(),
+        endpoint: "/actions/hire_builder".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "company_id": {
+                    "type": "string",
+                    "description": "The construction company to hire. Use list_construction_companies to see options."
+                }
+            },
+            "required": ["company_id"]
+        }),
+    }
+}
+
+fn tool_check_home_project() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "check_home_project".to_string(),
+        description: "Check the status of your home construction project. If builders are working, progress advances automatically based on sim-time. When progress reaches 100%, your home is complete and you can move in.".to_string(),
+        endpoint: "/actions/check_home_project".to_string(),
+        method: "POST".to_string(),
+        parameters: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+    }
+}
+
+fn tool_list_construction_companies() -> WorldToolDefinition {
+    WorldToolDefinition {
+        name: "list_construction_companies".to_string(),
+        description: "List available construction companies and their rates. You need to hire one to build your home after funding the project.".to_string(),
+        endpoint: "/construction/companies".to_string(),
+        method: "GET".to_string(),
         parameters: json!({
             "type": "object",
             "properties": {},
