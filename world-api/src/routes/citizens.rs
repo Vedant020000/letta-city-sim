@@ -1390,6 +1390,61 @@ async fn load_agent_wake_snapshot_tx(
         None => json!({"type": "wild"}),
     };
 
+    // Enrich with who else is at this location
+    let nearby_agents: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT a.id, a.name, a.state, a.current_activity
+        FROM agents a
+        WHERE a.current_location_id = $1
+          AND a.id != $2
+          AND a.is_active = TRUE
+        ORDER BY a.name
+        LIMIT 10
+        "#,
+    )
+    .bind(&snapshot.current_location_id)
+    .bind(agent_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let nearby_json: Vec<Value> = nearby_agents
+        .into_iter()
+        .map(|(id, name, state, activity)| {
+            json!({
+                "id": id,
+                "name": name,
+                "state": state,
+                "activity": activity,
+            })
+        })
+        .collect();
+
+    // Enrich with recent events at this location
+    let recent_events: Vec<(String, Option<String>, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        r#"
+        SELECT type, actor_id, description, occurred_at
+        FROM events
+        WHERE location_id = $1
+        ORDER BY occurred_at DESC
+        LIMIT 5
+        "#,
+    )
+    .bind(&snapshot.current_location_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let events_json: Vec<Value> = recent_events
+        .into_iter()
+        .map(|(etype, actor_id, description, occurred_at)| {
+            json!({
+                "type": etype,
+                "actor_id": actor_id,
+                "description": description,
+                "occurred_at": occurred_at.to_rfc3339(),
+            })
+        })
+        .collect();
+
     Ok(json!({
         "agent_id": snapshot.id,
         "citizen_id": snapshot.id,
@@ -1412,6 +1467,8 @@ async fn load_agent_wake_snapshot_tx(
         "inventory": inventory_json,
         "current_intention": intention_json,
         "housing": housing_json,
+        "nearby_agents": nearby_json,
+        "recent_events_at_location": events_json,
         "world_time": {
             "hour": sim_hour,
             "time_of_day": crate::routes::world::time_of_day_from_hour(sim_hour),

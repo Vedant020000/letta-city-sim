@@ -13,6 +13,7 @@ use tracing_subscriber::FmtSubscriber;
 
 mod auth;
 mod error;
+mod heartbeat;
 mod models;
 mod routes;
 mod state;
@@ -102,6 +103,9 @@ async fn main() -> AppResult<()> {
         .unwrap_or(3001);
 
     let state = AppState::new(&database_url, max_connections).await?;
+
+    // Start the simulation heartbeat — drives vitals alerts and idle wakes
+    heartbeat::spawn_heartbeat(state.clone());
 
     let app = Router::new()
         .route("/health", get(health_check))
