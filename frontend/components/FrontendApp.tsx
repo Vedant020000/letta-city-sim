@@ -1,22 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { AgentInspector } from "@/components/AgentInspector";
 import { EventFeed } from "@/components/EventFeed";
 import { PhaserMap } from "@/components/PhaserMap";
 import { TownPulsePanel } from "@/components/TownPulsePanel";
 import { fetchBootstrapSnapshot, getWsUrl } from "@/lib/api";
 import { initialSimState, simReducer } from "@/lib/sim-store";
 import { connectWorldEvents } from "@/lib/ws-client";
+import { Agent } from "@/types/world";
 
 function formatWorldTime(value: string | null) {
-  if (!value) return "-";
+  if (!value) return "—";
   return new Date(value).toLocaleString();
 }
 
 export function FrontendApp() {
   const [state, dispatch] = useReducer(simReducer, initialSimState);
   const refreshTimerRef = useRef<number | null>(null);
-  const intentionsByAgent = new Map(state.currentIntentions.map((intention) => [intention.agent_id, intention]));
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [showEventFeed, setShowEventFeed] = useState(false);
+
+  const selectedAgent = selectedAgentId
+    ? state.agents.find((a) => a.id === selectedAgentId) ?? null
+    : null;
+
+  const handleAgentClick = useCallback((agentId: string) => {
+    setSelectedAgentId((prev) => (prev === agentId ? null : agentId));
+  }, []);
 
   const loadSnapshot = useCallback(async (mode: "bootstrap" | "refresh") => {
     try {
@@ -72,88 +83,120 @@ export function FrontendApp() {
   return (
     <main className="page">
       <div className="shell">
-        <section className="hero">
-          <div className="eyebrow">maintainer-owned frontend engine MVP</div>
-          <h1>Simulation frontend foundation</h1>
-          <p>
-            This is the minimum viable frontend engine for letta-city-sim: bootstrap from the World API,
-            subscribe to <code>/ws/events</code>, render a placeholder Phaser town surface, and expose a raw event feed for debugging.
-          </p>
-          <div className="status-grid">
-            <div className="stat-card">
-              <span className="stat-label">World time</span>
-              <span className="stat-value small">{state.worldTime ? `${state.worldTime.time_of_day} · ${formatWorldTime(state.worldTime.timestamp)}` : "loading"}</span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Locations</span>
-              <span className="stat-value">{state.locations.length}</span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Agents</span>
-              <span className="stat-value">{state.agents.length}</span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Event stream</span>
-              <span className={`connection-pill ${state.connectionState}`}>{state.connectionState}</span>
+        {/* Compact header */}
+        <header className="top-bar">
+          <div className="top-bar-left">
+            <span className="logo">⬡</span>
+            <div>
+              <h1>letta-city-sim</h1>
+              <span className="top-bar-subtitle">autonomous AI agents in a living town</span>
             </div>
           </div>
-        </section>
-
-        <TownPulsePanel pulse={state.townPulse} />
+          <div className="top-bar-stats">
+            <div className="stat-chip">
+              <span className="stat-chip-label">Time</span>
+              <span className="stat-chip-value">{state.worldTime ? state.worldTime.time_of_day : "—"}</span>
+            </div>
+            <div className="stat-chip">
+              <span className="stat-chip-label">Agents</span>
+              <span className="stat-chip-value">{state.agents.length}</span>
+            </div>
+            <div className="stat-chip">
+              <span className="stat-chip-label">Locations</span>
+              <span className="stat-chip-value">{state.locations.length}</span>
+            </div>
+            <span className={`connection-pill ${state.connectionState}`}>{state.connectionState}</span>
+          </div>
+        </header>
 
         {state.loading ? <div className="loading">Bootstrapping world snapshot...</div> : null}
         {state.error ? <div className="error-box">{state.error}</div> : null}
 
+        {/* Town pulse */}
+        <TownPulsePanel pulse={state.townPulse} />
+
+        {/* Main layout: map + sidebar */}
         <div className="layout-grid">
           <div className="column">
             <section className="map-shell">
               <div className="map-shell-header">
                 <div className="map-shell-title">
                   <strong>Town view</strong>
-                  <span>Phaser placeholder renderer using location map_x/map_y anchors and agent markers.</span>
+                  <span>Click an agent to inspect</span>
                 </div>
-                <span className={`connection-pill ${state.connectionState}`}>{state.connectionState}</span>
               </div>
               <div className="map-frame">
-                <PhaserMap agents={state.agents} locations={state.locations} />
+                <PhaserMap
+                  agents={state.agents}
+                  locations={state.locations}
+                  onAgentClick={handleAgentClick}
+                  selectedAgentId={selectedAgentId}
+                />
               </div>
             </section>
 
+            {/* Agent roster — compact */}
             <section className="panel">
-              <h2>Agents in snapshot</h2>
+              <div className="panel-header">
+                <h2>Agents</h2>
+                <button
+                  className={`toggle-btn ${showEventFeed ? "active" : ""}`}
+                  onClick={() => setShowEventFeed(!showEventFeed)}
+                >
+                  {showEventFeed ? "Hide events" : "Show events"}
+                </button>
+              </div>
               <div className="agent-list">
                 {state.agents.map((agent) => (
-                  <div className="agent-row" key={agent.id}>
-                    <div>
-                      <strong>{agent.name}</strong>
-                      <small>
-                        {agent.occupation} · {agent.current_location_id}
-                      </small>
-                      {intentionsByAgent.get(agent.id) ? (
-                        <small className="agent-intention">
-                          Intends: {intentionsByAgent.get(agent.id)?.summary}
-                          <span>{intentionsByAgent.get(agent.id)?.reason}</span>
-                        </small>
-                      ) : null}
+                  <div
+                    className={`agent-row ${selectedAgentId === agent.id ? "selected" : ""}`}
+                    key={agent.id}
+                    onClick={() => handleAgentClick(agent.id)}
+                  >
+                    <div className="agent-row-left">
+                      <span className="agent-dot" style={{ background: `#${colorForAgentHex(agent.id)}` }} />
+                      <div>
+                        <strong>{agent.name}</strong>
+                        <small>{agent.occupation}</small>
+                      </div>
                     </div>
-                    <small>{agent.current_activity || agent.state}</small>
+                    <div className="agent-row-right">
+                      <span className={`state-badge small ${agent.state}`}>{agent.state}</span>
+                      {agent.current_activity && <small>{agent.current_activity}</small>}
+                    </div>
                   </div>
                 ))}
               </div>
             </section>
           </div>
 
-          <div className="column">
-            <section className="panel">
-              <h2>Raw websocket event feed</h2>
-              <p className="muted">
-                This is intentionally unpolished. It exists to prove the browser can consume the World API event stream end-to-end.
-              </p>
-              <EventFeed events={state.recentEvents} />
-            </section>
+          <div className="column sidebar">
+            {selectedAgent ? (
+              <AgentInspector agent={selectedAgent} onClose={() => setSelectedAgentId(null)} />
+            ) : (
+              <section className="panel inspector-empty">
+                <p className="muted">Click an agent on the map or in the roster to inspect them.</p>
+              </section>
+            )}
+
+            {showEventFeed && (
+              <section className="panel">
+                <h2>Event stream</h2>
+                <EventFeed events={state.recentEvents} />
+              </section>
+            )}
           </div>
         </div>
       </div>
     </main>
   );
+}
+
+function colorForAgentHex(agentId: string) {
+  const palette = ["3b82f6", "ef4444", "22c55e", "a855f7", "f97316", "06b6d4", "ec4899", "eab308"];
+  let hash = 0;
+  for (const char of agentId) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return palette[hash % palette.length];
 }
