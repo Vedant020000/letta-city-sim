@@ -9,7 +9,6 @@ use uuid::Uuid;
 use crate::auth::AgentId;
 use crate::error::{AppError, AppResult};
 use crate::models::board::{BoardPost, BoardStateWithIds, PublicBoardState};
-use crate::routes::citizens::enqueue_citizen_wake_tx;
 use crate::state::AppState;
 use crate::ws_events::WorldEventEnvelope;
 
@@ -68,16 +67,17 @@ pub async fn create_board_post(
     board_state.posts.push(post.clone());
     persist_board_state(&mut tx, &board_state).await?;
 
+    // Insert event with importance/visibility for routing
     sqlx::query(
         r#"
-        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at, importance, visibility)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
         "#,
     )
     .bind("board.post.created")
     .bind(&actor_id)
     .bind(&location_id)
-    .bind("A new notice board post was created")
+    .bind(format!("A new notice board post was created: {}", post.text))
     .bind(
         serde_json::json!({
             "post_id": post.id,
@@ -86,63 +86,34 @@ pub async fn create_board_post(
         .to_string(),
     )
     .bind(Utc::now())
+    .bind(3i16) // notable
+    .bind("public")
     .execute(&mut *tx)
     .await?;
 
-    // Broadcast WS event (best effort). Target: all agents currently at the board's location.
-    let targets: Vec<String> = sqlx::query_scalar(
-        r#"
-        SELECT id
-        FROM agents
-        WHERE current_location_id = $1
-        "#,
-    )
-    .bind(&location_id)
-    .fetch_all(&mut *tx)
-    .await?
-    .into_iter()
-    .collect();
-
-    let mut citizen_signal_targets = Vec::new();
-    for target_agent_id in targets.iter().filter(|target| target.as_str() != actor_id.as_str()) {
-        let enqueued = enqueue_citizen_wake_tx(
-            &mut tx,
-            target_agent_id,
-            "world_event",
-            serde_json::json!({
-                "kind": "board",
-                "ref": "board.posted",
-                "details": {
-                    "location_id": location_id,
-                    "post_id": post.id,
-                    "actor_id": actor_id,
-                }
-            }),
-            format!(
-                "A new notice board post appeared at {}. Check the structured wake payload if you want the post details.",
-                location_id
-            ),
-            serde_json::json!({
-                "event_type": "board.posted",
-                "location_id": location_id,
+    // Route through the central event router
+    let _routing_result = crate::routes::events::route_event(
+        &mut tx,
+        &state,
+        crate::models::event::RouteEventInput {
+            event_type: "board.post.created".to_string(),
+            actor_id: Some(actor_id.clone()),
+            location_id: Some(location_id.clone()),
+            importance: 3,
+            visibility: "public".to_string(),
+            description: format!("A new notice board post appeared at {}: {}", location_id, post.text),
+            metadata: serde_json::json!({
                 "post_id": post.id,
                 "text": post.text,
-                "actor_id": actor_id,
-                "created_at": post.created_at,
             }),
-            serde_json::json!([]),
-            true,
-        )
-        .await?;
-
-        if enqueued.should_signal {
-            citizen_signal_targets.push(target_agent_id.clone());
-        }
-    }
+            target_agent_ids: vec![],
+        },
+    )
+    .await?;
 
     let _ = state.event_tx().send(WorldEventEnvelope::new(
         "board.posted",
-        targets,
+        vec![],
         Some(location_id.clone()),
         serde_json::json!({
             "post_id": post.id,
@@ -153,10 +124,6 @@ pub async fn create_board_post(
     ));
 
     tx.commit().await?;
-
-    for target_agent_id in citizen_signal_targets {
-        let _ = state.citizen_signal_tx().send(target_agent_id);
-    }
 
     Ok(Json(post))
 }
@@ -180,8 +147,8 @@ pub async fn delete_board_post(
 
     sqlx::query(
         r#"
-        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at, importance, visibility)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
         "#,
     )
     .bind("board.post.deleted")
@@ -190,6 +157,8 @@ pub async fn delete_board_post(
     .bind("A notice board post was deleted")
     .bind(serde_json::json!({ "post_id": post_id }).to_string())
     .bind(Utc::now())
+    .bind(1i16) // trivial
+    .bind("actor")
     .execute(&mut *tx)
     .await?;
 
@@ -211,8 +180,8 @@ pub async fn clear_board(
 
     sqlx::query(
         r#"
-        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at, importance, visibility)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
         "#,
     )
     .bind("board.cleared")
@@ -221,6 +190,8 @@ pub async fn clear_board(
     .bind("All notice board posts were removed")
     .bind(serde_json::json!({ "removed_count": removed_count }).to_string())
     .bind(Utc::now())
+    .bind(1i16) // trivial
+    .bind("actor")
     .execute(&mut *tx)
     .await?;
 
