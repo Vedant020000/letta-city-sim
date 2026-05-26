@@ -43,6 +43,7 @@ COPY --from=frontend-builder /build/frontend /app/frontend
 COPY world-api/migrations /app/migrations
 COPY seed /app/seed
 COPY scripts/db-bootstrap.sh /app/scripts/db-bootstrap.sh
+COPY scripts/seed-order.txt /app/scripts/seed-order.txt
 COPY scripts/start-bundled.sh /app/scripts/start-bundled.sh
 
 RUN chmod +x /app/scripts/db-bootstrap.sh /app/scripts/start-bundled.sh

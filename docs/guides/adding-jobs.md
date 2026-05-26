@@ -134,3 +134,7 @@ node .\lcity\bin\lcity.mjs list_agent_jobs --agent-id eddy_lin
 If your change is mostly **new role content, metadata, assignments, or docs**, it is probably community-safe.
 
 If your change is mostly **new orchestration logic, policy, or schema redesign**, stop and check with a maintainer first.
+
+## Automated validation
+
+Before opening your PR, run `node scripts/validate-seeds.mjs` to catch JSONB and column-count issues.

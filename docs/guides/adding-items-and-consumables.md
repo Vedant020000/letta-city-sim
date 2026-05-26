@@ -159,3 +159,7 @@ Stop and ask before proceeding if your contribution needs:
 - major vitals model changes
 
 Those are maintainer-owned decisions.
+
+## Automated validation
+
+Before opening your PR, run `node scripts/validate-seeds.mjs` to catch inventory constraint and reference issues.

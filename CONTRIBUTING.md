@@ -99,6 +99,47 @@ Helpful checks:
 - Rust/backend change: run `cargo check` in `world-api`
 - seed-data change: validate with `TESTING.md` and the relevant guide in `docs/guides/`
 
+### Seed data validation
+
+If your PR changes any file in `seed/`:
+
+1. **Run the static linter** — catches column mismatches, bad JSONB, dangling
+   references, and adjacency issues without needing a database:
+
+   ```powershell
+   node scripts/validate-seeds.mjs
+   ```
+
+2. **Run the bootstrap smoke test** — proves the full migration + seed sequence
+   works on a fresh database (requires Docker and a Bash-compatible shell
+   such as Git Bash, WSL, macOS, or Linux):
+
+   ```bash
+   ./scripts/bootstrap-smoke.sh
+   ```
+
+3. **Manual spot-check** — after seeding locally, run the relevant curl commands
+   from `TESTING.md` sections 2–5 to confirm your new data is accessible.
+
+> **For reviewers/maintainers:** before merging a seed-data PR, also run the
+> production-like migrated bootstrap to verify the change works on a database
+> with older migrations already applied:
+>
+> ```bash
+> ./scripts/bootstrap-smoke.sh --migrated
+> ```
+
+#### Quick checklist
+
+- [ ] `node scripts/validate-seeds.mjs` exits 0
+- [ ] New location IDs appear in both directions in `adjacency.sql`
+- [ ] New JSONB fields match the structure of existing rows in the same table
+- [ ] If adding a job: `employer_id` references an agent from `agents.sql` (or is NULL)
+- [ ] If adding inventory: exactly one of `held_by` / `location_id` is set
+- [ ] If adding a consumable: `consumable_type` is one of food/water/stamina/sleep/hygiene/appearance,
+      and both `vital_value` and `quantity` are positive integers
+- [ ] If adding a new seed file: added to `scripts/seed-order.txt`
+
 ## PR expectations
 
 Please keep PRs:
