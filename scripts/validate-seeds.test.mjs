@@ -95,6 +95,34 @@ describe('validate-seeds falsifiability', () => {
     });
   });
 
+  // ── Check 1b: line numbers ─────────────────────────────────────────
+  it('reports the line for the matching INSERT, not an earlier same-prefix INSERT', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'seed-test-'));
+    const sql = [
+      "INSERT INTO jobs (id, title) VALUES ('first_job', 'First Job');",
+      "",
+      "-- This second INSERT has the same prefix but is the failing one.",
+      "INSERT INTO jobs (id, title) VALUES ('second_job', 'Second Job', 'extra');",
+      "",
+    ].join('\n');
+
+    try {
+      await writeFile(join(tmp, 'jobs.sql'), sql);
+      await writeFile(join(tmp, 'seed-order.txt'), 'jobs.sql\n');
+
+      const result = await validateSeeds(tmp, {
+        seedOrderPath: join(tmp, 'seed-order.txt'),
+      });
+
+      const failure = result.failures.find(f => f.check === 'column-count');
+      assert.ok(failure, 'Must detect the second INSERT column-count mismatch');
+      assert.strictEqual(failure.line, 4,
+        'Column-count failure should point to the second INSERT line');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
   // ── Check 2: double-quote ──────────────────────────────────────────
   it('fails on double-quoted string in VALUES', async () => {
     const original = await readSeed('locations.sql');

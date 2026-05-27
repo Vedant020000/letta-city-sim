@@ -179,7 +179,7 @@ function unquoteValue(val) {
 
 /**
  * Find all INSERT INTO statements in a SQL file.
- * Returns array of { table, columns, tuples, rawText, lineNumber }.
+ * Returns array of { table, columns, tuples, lineNumber, fileName }.
  */
 function parseInserts(sql, fileName) {
   const stripped = stripComments(sql);
@@ -227,9 +227,7 @@ function parseInserts(sql, fileName) {
     const valuesText = afterValues.slice(0, end);
     const tuples = extractValuesTuples(valuesText);
 
-    // Figure out line number of INSERT in original sql
-    const beforeInsert = sql.slice(0, sql.indexOf(match[0].slice(0, 20)));
-    const lineNumber = (beforeInsert.match(/\n/g) || []).length + 1;
+    const lineNumber = (stripped.slice(0, match.index).match(/\n/g) || []).length + 1;
 
     inserts.push({ table, columns, tuples, lineNumber, fileName });
   }
