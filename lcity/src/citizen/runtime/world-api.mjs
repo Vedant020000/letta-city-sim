@@ -186,3 +186,38 @@ export async function invokeCitizenLifecycle(config, wake, action, args = {}) {
     body: response.payload,
   };
 }
+
+export async function invokeDirectAction(config, action, args = {}) {
+  const apiBase = normalizeApiBase(config.world.api_base.value);
+  const response = await requestJson(`${apiBase}/actions/${encodeURIComponent(action)}`, {
+    method: "POST",
+    headers: buildWorldToolHeaders(config),
+    body: args,
+  });
+
+  return {
+    ok: response.ok,
+    status_code: response.status,
+    body: response.payload,
+  };
+}
+
+export async function waitForInterrupt(config, agentId, timeoutMs = 30000) {
+  const apiBase = normalizeApiBase(config.world.api_base.value);
+  const response = await requestJson(
+    `${apiBase}/v1/agents/${encodeURIComponent(agentId)}/wait?timeout_ms=${encodeURIComponent(timeoutMs)}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${config.world.auth.bearer_token.value}`,
+        "x-agent-id": agentId,
+      },
+    },
+  );
+
+  return {
+    ok: response.ok,
+    status_code: response.status,
+    body: response.payload,
+  };
+}

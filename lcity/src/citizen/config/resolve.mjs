@@ -341,6 +341,7 @@ export function resolveRuntimeConfig({ flags = {}, cwd = process.cwd() } = {}) {
   const displayMode = resolveDisplayMode(flags, mode, profileData);
 
   const resolved = {
+    _command: flags.command || "",
     mode: mode.value,
     mode_entry: mode,
     profile: {
