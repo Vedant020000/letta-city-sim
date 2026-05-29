@@ -108,10 +108,13 @@ export function TownPulsePanel({ pulse }: { pulse: TownPulse | null }) {
       {visibleAgents.length > 0 ? (
         <div className="pulse-agents">
           {visibleAgents.map((agent) => (
-            <div className="pulse-agent" key={agent.agent_id}>
+            <div className={`pulse-agent ${agent.state === "traveling" || agent.state === "walking" ? "traveling" : ""}`} key={agent.agent_id}>
               <strong>{agent.name}</strong>
               <span>
-                {agent.primary_job_name || agent.occupation} · {agent.location_name}
+                {agent.state === "traveling" || agent.state === "walking"
+                  ? `🚶 Traveling${agent.expected_location_id ? ` → ${agent.expected_location_id}` : ""}`
+                  : `${agent.primary_job_name || agent.occupation} · ${agent.location_name}`
+                }
               </span>
               <small>{agent.intention_summary || agent.current_activity}</small>
             </div>

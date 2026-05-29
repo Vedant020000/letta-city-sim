@@ -30,13 +30,42 @@ function applyEvent(state: SimState, event: WorldEventEnvelope): SimState {
   const eventType = resolveEventType(event);
 
   const agents = state.agents.map((agent) => {
+    if (eventType === "location.exit") {
+      const payload = event.payload as {
+        agent_id?: string;
+        from_location_id?: string;
+        to_location_id?: string;
+      };
+      if (payload.agent_id === agent.id) {
+        return {
+          ...agent,
+          state: "traveling",
+          travel_destination_id: payload.to_location_id ?? null,
+          travel_from_location_id: payload.from_location_id ?? null,
+          travel_started_at: event.ts ?? new Date().toISOString(),
+          travel_arrives_at: null,
+          travel_total_secs: null,
+          travel_path: null,
+        };
+      }
+    }
+
     if (eventType === "location.enter") {
-      const payload = event.payload as { agent_id?: string; to_location_id?: string };
+      const payload = event.payload as {
+        agent_id?: string;
+        to_location_id?: string;
+      };
       if (payload.agent_id === agent.id && payload.to_location_id) {
         return {
           ...agent,
           current_location_id: payload.to_location_id,
-          state: "walking",
+          state: "idle",
+          travel_destination_id: null,
+          travel_from_location_id: null,
+          travel_started_at: null,
+          travel_arrives_at: null,
+          travel_total_secs: null,
+          travel_path: null,
         };
       }
     }

@@ -1,9 +1,10 @@
 "use client";
 
-import { Agent } from "@/types/world";
+import { Agent, Location } from "@/types/world";
 
 type Props = {
   agent: Agent;
+  locations: Location[];
   onClose: () => void;
 };
 
@@ -30,11 +31,31 @@ function stateLabel(state: string) {
     case "sleeping": return "💤 Sleeping";
     case "idle": return "Idle";
     case "walking": return "🚶 Walking";
+    case "traveling": return "🚀 Traveling";
     default: return state;
   }
 }
 
-export function AgentInspector({ agent, onClose }: Props) {
+function formatETA(arrivesAt: string | null): string {
+  if (!arrivesAt) return "unknown";
+  const arrival = new Date(arrivesAt).getTime();
+  const now = Date.now();
+  const remaining = Math.max(0, Math.round((arrival - now) / 1000));
+  if (remaining < 60) return `~${remaining}s`;
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  return `~${mins}m ${secs}s`;
+}
+
+function locationName(locationId: string | null, locations: Location[]): string {
+  if (!locationId) return "—";
+  const loc = locations.find((l) => l.id === locationId);
+  return loc ? loc.name : locationId;
+}
+
+export function AgentInspector({ agent, locations, onClose }: Props) {
+  const isTraveling = agent.state === "traveling" || agent.state === "walking";
+
   return (
     <div className="inspector-panel">
       <div className="inspector-header">
@@ -51,6 +72,32 @@ export function AgentInspector({ agent, onClose }: Props) {
           <span className="inspector-activity">{agent.current_activity}</span>
         )}
       </div>
+
+      {isTraveling && (
+        <div className="inspector-section travel-info">
+          <h4>Traveling</h4>
+          <div className="travel-detail">
+            <span className="travel-label">From</span>
+            <span className="travel-value">{locationName(agent.travel_from_location_id ?? agent.current_location_id, locations)}</span>
+          </div>
+          <div className="travel-detail">
+            <span className="travel-label">To</span>
+            <span className="travel-value travel-destination">{locationName(agent.travel_destination_id, locations)}</span>
+          </div>
+          {agent.travel_arrives_at && (
+            <div className="travel-detail">
+              <span className="travel-label">ETA</span>
+              <span className="travel-value travel-eta">{formatETA(agent.travel_arrives_at)}</span>
+            </div>
+          )}
+          {!agent.travel_arrives_at && agent.travel_total_secs != null && (
+            <div className="travel-detail">
+              <span className="travel-label">ETA</span>
+              <span className="travel-value travel-eta">~{agent.travel_total_secs}s</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="inspector-section">
         <h4>Vitals</h4>
@@ -84,7 +131,7 @@ export function AgentInspector({ agent, onClose }: Props) {
 
       <div className="inspector-section">
         <h4>Location</h4>
-        <span className="inspector-location">{agent.current_location_id}</span>
+        <span className="inspector-location">{locationName(agent.current_location_id, locations)}</span>
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+// DEPRECATION: mock-run is a debug harness for the legacy wake-driven system.
+// Prefer direct commands: `lcity citizen wait`, `look-around`, `move-to`.
 import { createHarnessStore } from "../ui/state.mjs";
 import { runMockHarness } from "../runtime/mock-harness.mjs";
 

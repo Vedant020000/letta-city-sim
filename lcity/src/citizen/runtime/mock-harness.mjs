@@ -1,3 +1,5 @@
+// DEPRECATION: mock-harness is part of the legacy wake-driven system.
+// Prefer direct commands: `lcity citizen wait`, `look-around`, `move-to`.
 import WebSocket from "ws";
 
 function sleep(ms, signal) {

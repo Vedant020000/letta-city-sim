@@ -303,9 +303,72 @@ pre {
   color: var(--muted);
 }
 
+.state-badge.traveling {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.1);
+}
+
 .state-badge.small {
   padding: 2px 6px;
   font-size: 0.68rem;
+}
+
+/* ── Travel info ── */
+
+.travel-info {
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.06);
+  padding: 10px;
+}
+
+.travel-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.84rem;
+}
+
+.travel-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.travel-value {
+  color: var(--text);
+  font-family: Consolas, monospace;
+  font-size: 0.84rem;
+}
+
+.travel-destination {
+  color: var(--accent);
+}
+
+.travel-eta {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.travel-destination-inline {
+  color: var(--accent);
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.travel-eta-inline {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+/* ── Pulse agent traveling ── */
+
+.pulse-agent.traveling {
+  border-color: rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.06);
 }
 
 /* ── Inspector ── */

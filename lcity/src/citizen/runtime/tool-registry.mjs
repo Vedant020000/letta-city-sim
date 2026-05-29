@@ -1,3 +1,6 @@
+// DEPRECATION: tool-registry is only used by the legacy wake-driven session-runner.
+// Direct commands (wait, look-around, move-to) do not use this module.
+// This file will be removed once the wake-driven path is fully retired.
 import { jsonResult } from "@letta-ai/letta-code-sdk";
 import { invokeWorldTool } from "./world-api.mjs";
 

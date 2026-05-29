@@ -2,6 +2,12 @@ import { resolveRuntimeConfig, validateResolvedConfig } from "../config.mjs";
 import { createHarnessStore } from "../ui/state.mjs";
 import { runHarness } from "../runtime/harness.mjs";
 
+// DEPRECATION: The wake-driven harness (run, interactive, mock-run) is legacy.
+// Prefer direct commands: `lcity citizen wait`, `look-around`, `move-to`.
+const WAKE_HARNESS_DEPRECATION =
+  "[deprecation] The wake-driven harness is legacy. Prefer direct commands: " +
+  "lcity citizen wait, look-around, move-to. The harness will be removed in a future release.";
+
 function bindShutdownSignals(controller) {
   const onSignal = () => controller.abort();
   process.once("SIGINT", onSignal);
@@ -24,6 +30,13 @@ function toPlainEvent(event, payload = {}) {
 export async function runRunCommand({ flags }) {
   let ui = null;
   let unbindSignals = () => {};
+
+  // Emit deprecation notice so callers know to migrate
+  if (flags.plain || !process.stdout.isTTY) {
+    console.log(JSON.stringify({ ts: new Date().toISOString(), event: "deprecation_warning", message: WAKE_HARNESS_DEPRECATION }));
+  } else {
+    console.error(WAKE_HARNESS_DEPRECATION);
+  }
 
   try {
     const resolved = resolveRuntimeConfig({ flags, cwd: flags.cwd || process.cwd() });

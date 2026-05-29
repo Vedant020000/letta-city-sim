@@ -1,3 +1,6 @@
+// DEPRECATION: The wake-client implements the legacy wake-driven loop.
+// Direct commands (wait, look-around, move-to) are the preferred path.
+// This file will be removed once the wake-driven path is fully retired.
 import WebSocket from "ws";
 import { processWake } from "./session-runner.mjs";
 import { claimCitizenWake } from "./world-api.mjs";

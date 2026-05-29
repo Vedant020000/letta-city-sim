@@ -61,6 +61,7 @@ function stateIcon(state: string): string {
     case "sleeping": return "💤";
     case "idle": return "◦";
     case "walking": return "→";
+    case "traveling": return "✈";
     default: return "•";
   }
 }
@@ -256,6 +257,7 @@ export class TownScene extends Phaser.Scene {
 
   private upsertAgentMarker(agent: Agent, x: number, y: number) {
     const isSelected = this.selectedAgentId === agent.id;
+    const isTraveling = agent.state === "traveling" || agent.state === "walking";
     let marker = this.agentMarkers.get(agent.id);
 
     if (!marker) {
@@ -281,6 +283,16 @@ export class TownScene extends Phaser.Scene {
       stateText.setOrigin(0.5, 0.5);
       marker.add(stateText);
 
+      // Travel destination indicator (shown below marker)
+      const destText = this.add.text(0, 18, "", {
+        color: "#fbbf24",
+        fontSize: "8px",
+        fontFamily: "Inter, Arial, sans-serif",
+      });
+      destText.setOrigin(0.5, 0.5);
+      destText.setVisible(false);
+      marker.add(destText);
+
       // Click handler
       circle.setInteractive({ useHandCursor: true });
       circle.on("pointerdown", () => {
@@ -289,6 +301,13 @@ export class TownScene extends Phaser.Scene {
 
       this.markerLayer.add(marker);
       this.agentMarkers.set(agent.id, marker);
+
+      // Pulsing animation for traveling agents
+      if (isTraveling) {
+        this.addTravelPulse(marker, circle);
+        destText.setVisible(true);
+      }
+
       return;
     }
 
@@ -296,6 +315,30 @@ export class TownScene extends Phaser.Scene {
     const circle = marker.getAt(0) as Phaser.GameObjects.Arc;
     if (circle && circle.setStrokeStyle) {
       circle.setStrokeStyle(isSelected ? 4 : 2, isSelected ? 0xfbbf24 : 0x0f172a);
+    }
+
+    // Update travel destination text (index 3)
+    const destText = marker.getAt(3) as Phaser.GameObjects.Text;
+    if (destText && destText.setText) {
+      if (isTraveling && agent.travel_destination_id) {
+        destText.setText("→ " + agent.travel_destination_id);
+        destText.setVisible(true);
+      } else {
+        destText.setVisible(false);
+      }
+    }
+
+    // Update state icon (index 2)
+    const stateText = marker.getAt(2) as Phaser.GameObjects.Text;
+    if (stateText && stateText.setText) {
+      stateText.setText(stateIcon(agent.state));
+    }
+
+    // Manage travel pulse animation
+    if (isTraveling && !marker.getData("travelPulseActive")) {
+      this.addTravelPulse(marker, circle);
+    } else if (!isTraveling && marker.getData("travelPulseActive")) {
+      this.removeTravelPulse(marker);
     }
 
     this.tweens.killTweensOf(marker);
@@ -312,6 +355,33 @@ export class TownScene extends Phaser.Scene {
       duration: MARKER_TWEEN_MS,
       ease: "Sine.easeInOut",
     });
+  }
+
+  private addTravelPulse(marker: Phaser.GameObjects.Container, circle: Phaser.GameObjects.Arc) {
+    marker.setData("travelPulseActive", true);
+    // Pulsing glow effect
+    this.tweens.add({
+      targets: circle,
+      alpha: 0.5,
+      duration: 500,
+      ease: "Sine.easeInOut",
+      yoyo: true,
+      repeat: -1,
+    });
+    // Yellow border for traveling
+    if (circle.setStrokeStyle) {
+      circle.setStrokeStyle(3, 0xfbbf24);
+    }
+  }
+
+  private removeTravelPulse(marker: Phaser.GameObjects.Container) {
+    marker.setData("travelPulseActive", false);
+    const circle = marker.getAt(0) as Phaser.GameObjects.Arc;
+    if (circle) {
+      this.tweens.killTweensOf(circle);
+      circle.setAlpha(1);
+      circle.setStrokeStyle(2, 0x0f172a);
+    }
   }
 
   private clearAgentMarkers() {

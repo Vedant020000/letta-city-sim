@@ -1,3 +1,6 @@
+// DEPRECATION: session-runner is part of the legacy wake-driven harness.
+// Direct commands (wait, look-around, move-to) do not use this module.
+// This file will be removed once the wake-driven path is fully retired.
 import { resumeSession } from "@letta-ai/letta-code-sdk";
 import { buildWorldTools } from "./tool-registry.mjs";
 import { fetchToolManifest, respondCitizenWake } from "./world-api.mjs";

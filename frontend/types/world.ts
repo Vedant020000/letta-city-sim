@@ -14,6 +14,12 @@ export type Agent = {
   name: string;
   occupation: string;
   current_location_id: string;
+  travel_destination_id: string | null;
+  travel_started_at: string | null;
+  travel_arrives_at: string | null;
+  travel_path: Record<string, unknown> | null;
+  travel_total_secs: number | null;
+  travel_from_location_id: string | null;
   state: string;
   current_activity: string | null;
   is_npc: boolean;

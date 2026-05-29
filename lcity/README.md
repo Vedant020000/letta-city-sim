@@ -73,7 +73,20 @@ node .\lcity\bin\lcity.mjs --api-base https://app-production-8df5.up.railway.app
 Citizen mode now lives under a namespace instead of a separate package:
 
 ```powershell
-lcity citizen run
+# Direct commands (preferred) — no wake loop, no SDK session required
+lcity citizen wait [--timeout-ms <ms>]
+lcity citizen look-around
+lcity citizen move-to --location-id <id>
+lcity citizen speak-to --target-agent-id <id> --message <text>
+lcity citizen sleep
+lcity citizen wake-up
+lcity citizen check-inventory
+lcity citizen check-world-time
+lcity citizen check-vitals
+lcity citizen check-balance
+lcity citizen set-activity --activity <text>
+
+# Config & diagnostics
 lcity citizen config show
 lcity citizen config validate
 lcity citizen doctor
@@ -83,14 +96,27 @@ lcity citizen profile use --name default
 lcity citizen tools preview
 ```
 
-Citizen runtime implementation notes:
+### Wake-driven harness (legacy)
+
+> **Deprecation notice:** The wake-driven harness (`run`, `interactive`, `mock-run`) is
+> legacy and will be removed in a future release. Prefer direct commands above, which
+> bypass the wake loop and SDK session entirely.
+
+```powershell
+# Legacy — still functional but deprecated
+lcity citizen run --mode env --plain
+lcity citizen interactive
+lcity citizen mock-run --agent-id <id> --sim-key <key>
+```
+
+Citizen runtime implementation notes (legacy harness):
 
 - built on **`@letta-ai/letta-code-sdk`**
 - resumes the configured Letta agent per wake
 - fetches a **server-owned tool manifest** from the World API
 - registers only the currently relevant local world tools for that wake/context
 
-Minimal env-mode run:
+Minimal env-mode run (legacy):
 
 ```powershell
 $env:LCITY_API_BASE="https://app-production-8df5.up.railway.app/api"

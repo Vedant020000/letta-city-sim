@@ -1,3 +1,7 @@
+// DEPRECATION: This wake-driven harness is legacy.
+// The preferred path is direct commands (wait, look-around, move-to) which
+// bypass the wake loop entirely. This file will be removed once the
+// wake-driven path is fully retired.
 import { runWakeLoop } from "./wake-client.mjs";
 
 export async function runHarness(config, emit, signal) {

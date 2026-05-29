@@ -1033,9 +1033,9 @@ fn wake_payload(wake: ClaimableWakeRow, agent_id: &str) -> AppResult<Value> {
 async fn complete_agent_travel_if_ready(state: &AppState, agent_id: &str) -> AppResult<Option<Value>> {
     let mut tx = state.pool().begin().await?;
 
-    let ready = sqlx::query_as::<_, (String, String, String)>(
+    let ready = sqlx::query_as::<_, (String, String, String, String)>(
         r#"
-        SELECT id, current_location_id, travel_destination_id
+        SELECT id, current_location_id, travel_destination_id, name
         FROM agents
         WHERE id = $1
           AND state = 'traveling'
@@ -1049,7 +1049,7 @@ async fn complete_agent_travel_if_ready(state: &AppState, agent_id: &str) -> App
     .fetch_optional(&mut *tx)
     .await?;
 
-    let Some((id, from_location_id, _to_location_id)) = ready else {
+    let Some((id, from_location_id, to_location_id, agent_name)) = ready else {
         tx.commit().await?;
         return Ok(None);
     };
@@ -1090,13 +1090,56 @@ async fn complete_agent_travel_if_ready(state: &AppState, agent_id: &str) -> App
     .bind(json!({
         "from_location_id": from_location_id,
         "to_location_id": updated.current_location_id,
-        "completion": "wait_poll",
+        "completion": "travel_arrival",
     }).to_string())
     .bind(Utc::now())
     .execute(&mut *tx)
     .await?;
 
+    // Enqueue citizen wake so the agent is notified of its own arrival
+    // (mirrors the heartbeat's complete_arrived_travelers side effects).
+    let enqueued = enqueue_citizen_wake_tx(
+        &mut tx,
+        &id,
+        "travel_arrival",
+        json!({
+            "kind": "travel",
+            "ref": "agent.travel.arrived",
+            "details": {
+                "from_location_id": from_location_id,
+                "to_location_id": to_location_id,
+            }
+        }),
+        format!("You arrived at {}.", to_location_id),
+        json!({
+            "event_type": "travel.arrived",
+            "from_location_id": from_location_id,
+            "to_location_id": to_location_id,
+            "agent_name": agent_name,
+        }),
+        json!([]),
+        true,
+    )
+    .await?;
+
     tx.commit().await?;
+
+    // Broadcast WS event (mirrors heartbeat)
+    let _ = state.event_tx().send(crate::ws_events::WorldEventEnvelope::new(
+        "travel.arrived",
+        vec![id.clone()],
+        Some(updated.current_location_id.clone()),
+        json!({
+            "agent_id": id,
+            "from_location_id": from_location_id,
+            "to_location_id": updated.current_location_id,
+        }),
+    ));
+
+    // Signal the citizen runtime if a wake was promoted to open
+    if enqueued.should_signal {
+        let _ = state.citizen_signal_tx().send(id.clone());
+    }
 
     Ok(Some(json!({
         "event_type": "travel.arrived",

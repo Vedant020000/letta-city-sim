@@ -22,6 +22,14 @@ export async function run(argv) {
       case "wait":
       case "look-around":
       case "move-to":
+      case "speak-to":
+      case "sleep":
+      case "wake-up":
+      case "check-inventory":
+      case "check-world-time":
+      case "check-vitals":
+      case "check-balance":
+      case "set-activity":
         return (await import("./commands/direct.mjs")).runDirectCitizenCommand({ command, flags });
       case "profile":
         return (await import("./commands/profile.mjs")).runProfileCommand({ subcommand, flags });

@@ -8,7 +8,7 @@ import { TownPulsePanel } from "@/components/TownPulsePanel";
 import { fetchBootstrapSnapshot, getWsUrl } from "@/lib/api";
 import { initialSimState, simReducer } from "@/lib/sim-store";
 import { connectWorldEvents } from "@/lib/ws-client";
-import { Agent } from "@/types/world";
+import { Agent, Location } from "@/types/world";
 
 function formatWorldTime(value: string | null) {
   if (!value) return "—";
@@ -162,7 +162,15 @@ export function FrontendApp() {
                     </div>
                     <div className="agent-row-right">
                       <span className={`state-badge small ${agent.state}`}>{agent.state}</span>
-                      {agent.current_activity && <small>{agent.current_activity}</small>}
+                      {(agent.state === "traveling" || agent.state === "walking") && agent.travel_destination_id ? (
+                        <small className="travel-destination-inline">
+                          → {locationNameForId(agent.travel_destination_id, state.locations)}
+                          {agent.travel_arrives_at && <span className="travel-eta-inline"> {formatETA(agent.travel_arrives_at)}</span>}
+                          {!agent.travel_arrives_at && agent.travel_total_secs != null && <span className="travel-eta-inline"> ~{agent.travel_total_secs}s</span>}
+                        </small>
+                      ) : (
+                        agent.current_activity && <small>{agent.current_activity}</small>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -172,7 +180,7 @@ export function FrontendApp() {
 
           <div className="column sidebar">
             {selectedAgent ? (
-              <AgentInspector agent={selectedAgent} onClose={() => setSelectedAgentId(null)} />
+              <AgentInspector agent={selectedAgent} locations={state.locations} onClose={() => setSelectedAgentId(null)} />
             ) : (
               <section className="panel inspector-empty">
                 <p className="muted">Click an agent on the map or in the roster to inspect them.</p>
@@ -199,4 +207,21 @@ function colorForAgentHex(agentId: string) {
     hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   }
   return palette[hash % palette.length];
+}
+
+function locationNameForId(locationId: string | null, locations: Location[]): string {
+  if (!locationId) return "—";
+  const loc = locations.find((l) => l.id === locationId);
+  return loc ? loc.name : locationId;
+}
+
+function formatETA(arrivesAt: string | null): string {
+  if (!arrivesAt) return "";
+  const arrival = new Date(arrivesAt).getTime();
+  const now = Date.now();
+  const remaining = Math.max(0, Math.round((arrival - now) / 1000));
+  if (remaining < 60) return `~${remaining}s`;
+  const mins = Math.floor(remaining / 60);
+  const secs = remaining % 60;
+  return `~${mins}m ${secs}s`;
 }

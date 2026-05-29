@@ -23,6 +23,18 @@ function normalizeTimeout(value, fallback = 30000) {
   return Math.floor(parsed);
 }
 
+// ---------------------------------------------------------------------------
+// Zero-arg direct actions — just invoke and print
+// ---------------------------------------------------------------------------
+const ZERO_ARG_ACTIONS = {
+  "check-inventory": "get_inventory",
+  "check-world-time": "check_world_time",
+  "check-vitals": "check_vitals",
+  "check-balance": "check_balance",
+  "sleep": "sleep",
+  "wake-up": "wake_up",
+};
+
 export async function runDirectCitizenCommand({ command, flags }) {
   const resolved = resolveRuntimeConfig({ flags, cwd: flags.cwd || process.cwd() });
   const agentId = resolved.world.auth.city_agent_id.value;
@@ -31,6 +43,15 @@ export async function runDirectCitizenCommand({ command, flags }) {
     throw new Error("missing city agent id; set .lcity/agent_id, profile world.auth.city_agent_id, or --city-agent-id");
   }
 
+  // --- Zero-arg actions (no required flags) ---
+  if (command in ZERO_ARG_ACTIONS) {
+    const actionName = ZERO_ARG_ACTIONS[command];
+    const response = await invokeDirectAction(resolved, actionName, {});
+    printJson(response);
+    return response.ok ? 0 : 1;
+  }
+
+  // --- Commands with specific argument handling ---
   switch (command) {
     case "look-around": {
       const response = await invokeDirectAction(resolved, "look_around", {});
@@ -81,6 +102,35 @@ export async function runDirectCitizenCommand({ command, flags }) {
         wait: summarizeWaitResult(waitResponse),
       });
       return moveResponse.ok && waitResponse.ok ? 0 : 1;
+    }
+
+    case "speak-to": {
+      const targetAgentId = String(flags.targetAgentId || flags.target || "").trim();
+      if (!targetAgentId) {
+        throw new Error("--target-agent-id is required for speak-to");
+      }
+      const message = String(flags.message || "").trim();
+      if (!message) {
+        throw new Error("--message is required for speak-to");
+      }
+
+      const response = await invokeDirectAction(resolved, "speak_to", {
+        target_agent_id: targetAgentId,
+        message,
+      });
+      printJson(response);
+      return response.ok ? 0 : 1;
+    }
+
+    case "set-activity": {
+      const activity = String(flags.activity || "").trim();
+      if (!activity) {
+        throw new Error("--activity is required for set-activity");
+      }
+
+      const response = await invokeDirectAction(resolved, "set_activity", { activity });
+      printJson(response);
+      return response.ok ? 0 : 1;
     }
 
     default:

@@ -19,9 +19,19 @@ function isUrl(value) {
   }
 }
 
+// Direct commands bypass the wake-driven harness entirely.
+// Keep this list in sync with the CLI dispatcher in cli.mjs.
+const DIRECT_COMMANDS = [
+  "wait", "look-around", "move-to", "speak-to",
+  "sleep", "wake-up", "check-inventory", "check-world-time",
+  "check-vitals", "check-balance", "set-activity",
+];
+
 export function validateResolvedConfig(resolved) {
   const errors = [];
   const warnings = [];
+
+  const directCommand = DIRECT_COMMANDS.includes(resolved._command || "");
 
   if (!isNonEmptyString(resolved.mode)) {
     errors.push("mode is required");
@@ -31,8 +41,11 @@ export function validateResolvedConfig(resolved) {
     errors.push("world.api_base must be a valid URL");
   }
 
-  if (!isNonEmptyString(resolved.world.ws_url.value) || !isUrl(resolved.world.ws_url.value)) {
-    errors.push("world.ws_url must be a valid URL");
+  // ws_url is only required for the wake-driven harness; direct commands don't use it
+  if (!directCommand) {
+    if (!isNonEmptyString(resolved.world.ws_url.value) || !isUrl(resolved.world.ws_url.value)) {
+      errors.push("world.ws_url must be a valid URL");
+    }
   }
 
   if (!isNonEmptyString(resolved.world.auth.city_agent_id.value)) {
@@ -60,8 +73,7 @@ export function validateResolvedConfig(resolved) {
     errors.push("world.tool_auth.sim_api_key is required when tool auth mode is sim_key");
   }
 
-  const directCommand = ["wait", "look-around", "move-to"].includes(resolved._command || "");
-
+  // Letta SDK credentials are only needed for the wake-driven harness
   if (!directCommand) {
     if (!isNonEmptyString(resolved.letta.agent_id.value)) {
       errors.push("letta.agent_id is required");
@@ -76,56 +88,60 @@ export function validateResolvedConfig(resolved) {
     }
   }
 
-  if (!isPositiveInteger(resolved.runtime.max_wake_iterations.value)) {
-    errors.push("runtime.max_wake_iterations must be a positive integer");
+  // Wake-specific runtime settings are only required for the wake-driven harness
+  if (!directCommand) {
+    if (!isPositiveInteger(resolved.runtime.max_wake_iterations.value)) {
+      errors.push("runtime.max_wake_iterations must be a positive integer");
+    }
+
+    if (!["claim", "ws"].includes(resolved.runtime.wake_transport.value)) {
+      errors.push("runtime.wake_transport must be one of claim, ws");
+    }
+
+    if (!isPositiveInteger(resolved.runtime.claim_wait_ms.value)) {
+      errors.push("runtime.claim_wait_ms must be a positive integer");
+    }
+
+    if (!isPositiveInteger(resolved.runtime.reconnect_initial_ms.value)) {
+      errors.push("runtime.reconnect_initial_ms must be a positive integer");
+    }
+
+    if (!isPositiveInteger(resolved.runtime.reconnect_max_ms.value)) {
+      errors.push("runtime.reconnect_max_ms must be a positive integer");
+    }
+
+    if (resolved.runtime.reconnect_max_ms.value < resolved.runtime.reconnect_initial_ms.value) {
+      errors.push("runtime.reconnect_max_ms must be >= runtime.reconnect_initial_ms");
+    }
+
+    if (!isPositiveInteger(resolved.runtime.recent_wake_cache_size.value)) {
+      errors.push("runtime.recent_wake_cache_size must be a positive integer");
+    }
+
+    if (!isBoolean(resolved.runtime.wake_auto_done.value)) {
+      errors.push("runtime.wake_auto_done must be a boolean");
+    }
+
+    if (!isBoolean(resolved.runtime.abort_on_unhandled_tool.value)) {
+      errors.push("runtime.abort_on_unhandled_tool must be a boolean");
+    }
+
+    if (!isBoolean(resolved.runtime.allow_wake_replay_on_reconnect.value)) {
+      errors.push("runtime.allow_wake_replay_on_reconnect must be a boolean");
+    }
+
+    if (!isBoolean(resolved.runtime.pause_on_error.value)) {
+      errors.push("runtime.pause_on_error must be a boolean");
+    }
   }
 
-  if (!["claim", "ws"].includes(resolved.runtime.wake_transport.value)) {
-    errors.push("runtime.wake_transport must be one of claim, ws");
-  }
-
-  if (!isPositiveInteger(resolved.runtime.claim_wait_ms.value)) {
-    errors.push("runtime.claim_wait_ms must be a positive integer");
-  }
-
-  if (!isPositiveInteger(resolved.runtime.reconnect_initial_ms.value)) {
-    errors.push("runtime.reconnect_initial_ms must be a positive integer");
-  }
-
-  if (!isPositiveInteger(resolved.runtime.reconnect_max_ms.value)) {
-    errors.push("runtime.reconnect_max_ms must be a positive integer");
-  }
-
-  if (resolved.runtime.reconnect_max_ms.value < resolved.runtime.reconnect_initial_ms.value) {
-    errors.push("runtime.reconnect_max_ms must be >= runtime.reconnect_initial_ms");
-  }
-
-  if (!isPositiveInteger(resolved.runtime.recent_wake_cache_size.value)) {
-    errors.push("runtime.recent_wake_cache_size must be a positive integer");
-  }
-
+  // Shared runtime settings (used by both paths)
   if (!isPositiveInteger(resolved.runtime.action_timeout_ms.value)) {
     errors.push("runtime.action_timeout_ms must be a positive integer");
   }
 
-  if (!isBoolean(resolved.runtime.wake_auto_done.value)) {
-    errors.push("runtime.wake_auto_done must be a boolean");
-  }
-
-  if (!isBoolean(resolved.runtime.abort_on_unhandled_tool.value)) {
-    errors.push("runtime.abort_on_unhandled_tool must be a boolean");
-  }
-
-  if (!isBoolean(resolved.runtime.allow_wake_replay_on_reconnect.value)) {
-    errors.push("runtime.allow_wake_replay_on_reconnect must be a boolean");
-  }
-
   if (!isPositiveInteger(resolved.runtime.max_consecutive_errors.value)) {
     errors.push("runtime.max_consecutive_errors must be a positive integer");
-  }
-
-  if (!isBoolean(resolved.runtime.pause_on_error.value)) {
-    errors.push("runtime.pause_on_error must be a boolean");
   }
 
   if (!isNonEmptyString(resolved.runtime.log_level.value)) {
@@ -154,6 +170,12 @@ export function validateResolvedConfig(resolved) {
 
   if (resolved.mode === "interactive" && resolved.profile.source === "none") {
     warnings.push("interactive mode is running without a selected profile");
+  }
+
+  // Deprecation warning for wake-driven harness usage
+  if (!directCommand && resolved._command !== "config" && resolved._command !== "profile"
+      && resolved._command !== "doctor" && resolved._command !== "tools") {
+    warnings.push("The wake-driven harness is legacy. Prefer direct commands: wait, look-around, move-to, speak-to, sleep, wake-up, check-inventory, check-world-time, check-vitals, check-balance, set-activity.");
   }
 
   return {
