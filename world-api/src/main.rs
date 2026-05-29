@@ -59,7 +59,7 @@ use routes::board::{
 };
 use routes::citizens::{
     citizen_action, claim_citizen_wake, close_citizen_wake, create_test_citizen_wake,
-    respond_citizen_wake, ws_citizen,
+    respond_citizen_wake, wait_for_agent_interrupt, ws_citizen,
 };
 use routes::economy::update_economy;
 use routes::events::{create_event, list_events};
@@ -124,6 +124,7 @@ async fn main() -> AppResult<()> {
         .route("/v1/citizen/action", post(citizen_action))
         .route("/v1/citizen/wakes/claim", post(claim_citizen_wake))
         .route("/v1/citizen/wakes/:wake_event_id/respond", post(respond_citizen_wake))
+        .route("/v1/agents/:id/wait", get(wait_for_agent_interrupt))
         .route("/actions/set_activity", post(action_set_activity))
         .route("/actions/move_to", post(action_move_to))
         .route("/actions/board_post", post(action_board_post))

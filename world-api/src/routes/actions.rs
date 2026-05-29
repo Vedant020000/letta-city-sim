@@ -124,9 +124,27 @@ pub async fn action_move_to(
     AgentId(agent_id): AgentId,
     Json(payload): Json<UpdateAgentLocationRequest>,
 ) -> AppResult<Json<ApiResponse<Agent>>> {
-    // Apply vitals decay, check stamina, and deduct — all in one transaction
+    let destination_id = payload.location_id.trim();
+    if destination_id.is_empty() {
+        return Err(AppError::BadRequest("location_id cannot be empty".to_string()));
+    }
+
+    // Apply vitals decay, check stamina, and deduct - all in one transaction
     let mut tx = state.pool().begin().await?;
     let agent = crate::routes::vitals::apply_vitals_decay_tx(&mut tx, &agent_id).await?;
+
+    if agent.state == "traveling" {
+        return Err(AppError::BadRequest(
+            "you are already traveling to a destination".to_string(),
+        ));
+    }
+
+    let path = crate::routes::pathfind::compute_shortest_path(state.pool(), &agent.current_location_id, destination_id).await?;
+    if path.travel_time_seconds == 0 {
+        tx.commit().await?;
+        let response = perform_agent_location_update(&state, &agent_id, destination_id).await?;
+        return Ok(Json(response));
+    }
 
     if agent.stamina_level < crate::routes::vitals::MOVE_STAMINA_COST {
         // Roll back the decay transaction (decay is harmless to lose — it'll be reapplied next time)
@@ -155,12 +173,67 @@ pub async fn action_move_to(
         ));
     }
 
+    let eta_wall_seconds = path.travel_time_seconds.max(1) as i64;
+    let now = Utc::now();
+    let arrives_at = now + chrono::Duration::seconds(eta_wall_seconds);
+    let updated_agent = sqlx::query_as::<_, Agent>(
+        r#"
+        UPDATE agents
+        SET state = 'traveling',
+            current_activity = $1,
+            activity_started_at = NOW(),
+            state_updated_at = NOW(),
+            updated_at = NOW(),
+            travel_destination_id = $2,
+            travel_started_at = NOW(),
+            travel_arrives_at = $3,
+            travel_path = $4::jsonb,
+            travel_total_secs = $5,
+            travel_from_location_id = $6
+        WHERE id = $7
+        RETURNING *
+        "#,
+    )
+    .bind(format!("Traveling to {}", destination_id))
+    .bind(destination_id)
+    .bind(arrives_at)
+    .bind(serde_json::to_string(&path.path).map_err(|err| AppError::Unexpected(err.to_string()))?)
+    .bind(path.travel_time_seconds)
+    .bind(&agent.current_location_id)
+    .bind(&agent_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.travel.started")
+    .bind(&updated_agent.id)
+    .bind(&updated_agent.current_location_id)
+    .bind(format!(
+        "Agent {} started traveling from {} to {}",
+        updated_agent.id, updated_agent.current_location_id, destination_id
+    ))
+    .bind(json!({
+        "from_location_id": updated_agent.current_location_id,
+        "to_location_id": destination_id,
+        "travel_time_seconds": path.travel_time_seconds,
+        "path": path.path,
+    }).to_string())
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
-
-
-    let response = perform_agent_location_update(&state, &agent_id, &payload.location_id).await?;
-    Ok(Json(response))
+    Ok(Json(ApiResponse::from(updated_agent).with_notification(crate::models::common::NotificationPayload {
+        message: format!("Traveling to {} (ETA ~{}s)", destination_id, path.travel_time_seconds),
+        mode: crate::models::common::NotificationMode::Deferred,
+        eta_seconds: Some(path.travel_time_seconds as u64),
+    })))
 }
 
 pub async fn action_board_post(
@@ -258,6 +331,19 @@ pub async fn action_look_around(
     State(state): State<AppState>,
     AgentId(agent_id): AgentId,
 ) -> AppResult<Json<ApiResponse<LookAroundResponse>>> {
+    let agent = sqlx::query_as::<_, Agent>(
+        r#"
+        SELECT *
+        FROM agents
+        WHERE id = $1 OR letta_agent_id = $1
+        LIMIT 1
+        "#,
+    )
+    .bind(&agent_id)
+    .fetch_optional(state.pool())
+    .await?
+    .ok_or(AppError::NotFound)?;
+
     let agent_row = sqlx::query_as::<_, (String, String)>(
         r#"
         SELECT a.current_location_id, l.name
@@ -339,7 +425,7 @@ pub async fn action_look_around(
     let hour = sim_time.hour();
     let time_of_day = crate::routes::world::time_of_day_from_hour(hour).to_string();
 
-    Ok(Json(ApiResponse::from(LookAroundResponse {
+    let mut response = ApiResponse::from(LookAroundResponse {
         location,
         nearby,
         objects,
@@ -347,7 +433,21 @@ pub async fn action_look_around(
         items_on_ground,
         time_of_day,
         hour,
-    })))
+    });
+
+    if agent.state == "traveling" {
+        let destination_id = agent.travel_destination_id.unwrap_or_else(|| "unknown".to_string());
+        let eta_seconds = agent
+            .travel_arrives_at
+            .map(|arrives_at| (arrives_at - Utc::now()).num_seconds().max(0) as u64);
+        response.notification = Some(crate::models::common::NotificationPayload {
+            message: format!("You are currently traveling from {} to {}.", agent.current_location_id, destination_id),
+            mode: crate::models::common::NotificationMode::Deferred,
+            eta_seconds,
+        });
+    }
+
+    Ok(Json(response))
 }
 
 pub async fn action_speak_to(

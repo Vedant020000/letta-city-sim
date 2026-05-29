@@ -46,6 +46,12 @@ pub fn spawn_heartbeat(state: AppState) {
 async fn heartbeat_tick(state: &AppState, tick: u64) -> AppResult<()> {
     let mut tx = state.pool().begin().await?;
 
+    // 0. Complete travel that has reached its ETA
+    let arrivals = complete_arrived_travelers(&mut tx, state).await?;
+    if arrivals > 0 {
+        info!(tick, arrivals, "Travel arrivals completed");
+    }
+
     // 1. Vitals-threshold wakes
     let vitals_wakes = check_vitals_thresholds(&mut tx).await?;
     if vitals_wakes > 0 {
@@ -60,6 +66,119 @@ async fn heartbeat_tick(state: &AppState, tick: u64) -> AppResult<()> {
 
     tx.commit().await?;
     Ok(())
+}
+
+async fn complete_arrived_travelers(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    state: &AppState,
+) -> AppResult<usize> {
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(
+        r#"
+        SELECT id, current_location_id, travel_destination_id, name
+        FROM agents
+        WHERE state = 'traveling'
+          AND travel_destination_id IS NOT NULL
+          AND travel_arrives_at IS NOT NULL
+          AND travel_arrives_at <= NOW()
+        FOR UPDATE
+        "#,
+    )
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut count = 0;
+    let mut signal_targets: Vec<String> = Vec::new();
+
+    for (agent_id, from_location_id, to_location_id, agent_name) in rows {
+        let updated_agent = sqlx::query_as::<_, crate::models::agent::Agent>(
+            r#"
+            UPDATE agents
+            SET current_location_id = travel_destination_id,
+                travel_destination_id = NULL,
+                travel_started_at = NULL,
+                travel_arrives_at = NULL,
+                travel_path = NULL,
+                travel_total_secs = NULL,
+                travel_from_location_id = NULL,
+                state = 'idle',
+                current_activity = NULL,
+                activity_started_at = NULL,
+                state_updated_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+            "#,
+        )
+        .bind(&agent_id)
+        .fetch_one(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+            "#,
+        )
+        .bind("agent.moved")
+        .bind(&agent_id)
+        .bind(&to_location_id)
+        .bind(format!("Agent {} arrived at location {}", agent_id, to_location_id))
+        .bind(json!({
+            "from_location_id": from_location_id,
+            "to_location_id": to_location_id,
+            "completion": "travel_arrival",
+        }).to_string())
+        .bind(chrono::Utc::now())
+        .execute(&mut **tx)
+        .await?;
+
+        let enqueued = crate::routes::citizens::enqueue_citizen_wake_tx(
+            tx,
+            &agent_id,
+            "travel_arrival",
+            json!({
+                "kind": "travel",
+                "ref": "agent.travel.arrived",
+                "details": {
+                    "from_location_id": from_location_id,
+                    "to_location_id": to_location_id,
+                }
+            }),
+            format!("You arrived at {}.", to_location_id),
+            json!({
+                "event_type": "travel.arrived",
+                "from_location_id": from_location_id,
+                "to_location_id": to_location_id,
+                "agent_name": agent_name,
+            }),
+            json!([]),
+            true,
+        )
+        .await?;
+
+        let _ = state.event_tx().send(crate::ws_events::WorldEventEnvelope::new(
+            "travel.arrived",
+            vec![agent_id.clone()],
+            Some(updated_agent.current_location_id.clone()),
+            json!({
+                "agent_id": agent_id,
+                "from_location_id": from_location_id,
+                "to_location_id": updated_agent.current_location_id,
+            }),
+        ));
+
+        if enqueued.should_signal {
+            signal_targets.push(agent_id.clone());
+        }
+
+        count += 1;
+    }
+
+    for target_id in signal_targets {
+        let _ = state.citizen_signal_tx().send(target_id);
+    }
+
+    Ok(count)
 }
 
 /// Check all active agents for critically low vitals and enqueue informational wakes.

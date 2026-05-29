@@ -5,6 +5,18 @@ function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
 }
 
+function summarizeWaitResult(response) {
+  const body = response?.body || {};
+  return {
+    ok: response.ok,
+    status_code: response.status_code,
+    status: body.status || "unknown",
+    ...(body.result ? { result: body.result } : {}),
+    ...(body.interrupt ? { interrupt: body.interrupt } : {}),
+    ...(body.error ? { error: body.error } : {}),
+  };
+}
+
 function normalizeTimeout(value, fallback = 30000) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
@@ -29,7 +41,12 @@ export async function runDirectCitizenCommand({ command, flags }) {
     case "wait": {
       const timeoutMs = normalizeTimeout(flags.timeoutMs ?? flags.timeout, 30000);
       const response = await waitForInterrupt(resolved, agentId, timeoutMs);
-      printJson(response);
+      printJson({
+        ok: response.ok,
+        command: "wait",
+        timeout_ms: timeoutMs,
+        wait: summarizeWaitResult(response),
+      });
       return response.ok ? 0 : 1;
     }
 
@@ -59,8 +76,9 @@ export async function runDirectCitizenCommand({ command, flags }) {
       printJson({
         ok: moveResponse.ok && waitResponse.ok,
         command: "move-to",
+        destination_id: locationId,
         move: moveResponse,
-        wait: waitResponse,
+        wait: summarizeWaitResult(waitResponse),
       });
       return moveResponse.ok && waitResponse.ok ? 0 : 1;
     }

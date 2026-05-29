@@ -127,6 +127,23 @@ pub async fn perform_agent_location_update(
     let mut tx = state.pool().begin().await?;
     let mut citizen_signal_targets: Vec<String> = Vec::new();
 
+    let current_state: Option<String> = sqlx::query_scalar(
+        r#"
+        SELECT state
+        FROM agents
+        WHERE id = $1
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if current_state.as_deref() == Some("traveling") {
+        return Err(AppError::BadRequest(
+            "agent is currently traveling; wait for arrival".to_string(),
+        ));
+    }
+
     let previous_location_id: Option<String> = sqlx::query_scalar(
         r#"
         SELECT current_location_id
