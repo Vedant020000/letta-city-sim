@@ -5,16 +5,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$seedFiles = @(
-    "seed/locations.sql",
-    "seed/dorms.sql",
-    "seed/adjacency.sql",
-    "seed/objects.sql",
-    "seed/agents.sql",
-    "seed/jobs.sql",
-    "seed/agent_jobs.sql",
-    "seed/location_roles.sql"
-)
+$seedOrderFile = Join-Path $PSScriptRoot "seed-order.txt"
+if (-Not (Test-Path $seedOrderFile)) {
+    throw "seed-order.txt not found at $seedOrderFile"
+}
+
+$seedFiles = Get-Content $seedOrderFile |
+    Where-Object { $_ -and $_ -notmatch '^\s*#' } |
+    ForEach-Object { "seed/$($_.Trim())" }
 
 foreach ($file in $seedFiles) {
     Write-Host "Applying $file ..."

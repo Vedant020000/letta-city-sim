@@ -145,3 +145,7 @@ Stop and ask before proceeding if your change requires:
 - map rendering architecture changes
 
 Those are maintainer-owned decisions.
+
+## Automated validation
+
+Before opening your PR, run `node scripts/validate-seeds.mjs` to catch adjacency and reference issues.

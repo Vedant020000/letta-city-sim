@@ -63,24 +63,26 @@ apply_seed_file() {
 }
 
 apply_seeds() {
-  apply_seed_file "$SEED_DIR/locations.sql"
-  if [ -f "$SEED_DIR/dorms.sql" ]; then
-    apply_seed_file "$SEED_DIR/dorms.sql"
+  SEED_ORDER_FILE="$(dirname "$0")/seed-order.txt"
+  if [ ! -f "$SEED_ORDER_FILE" ]; then
+    echo "ERROR: seed-order.txt not found at $SEED_ORDER_FILE" >&2
+    exit 1
   fi
-  apply_seed_file "$SEED_DIR/adjacency.sql"
-  apply_seed_file "$SEED_DIR/objects.sql"
-  apply_seed_file "$SEED_DIR/agents.sql"
-  apply_seed_file "$SEED_DIR/jobs.sql"
-  apply_seed_file "$SEED_DIR/agent_jobs.sql"
-  if [ -f "$SEED_DIR/location_roles.sql" ]; then
-    apply_seed_file "$SEED_DIR/location_roles.sql"
-  fi
-  if [ -f "$SEED_DIR/shops.sql" ]; then
-    apply_seed_file "$SEED_DIR/shops.sql"
-  fi
-  if [ -f "$SEED_DIR/banks.sql" ]; then
-    apply_seed_file "$SEED_DIR/banks.sql"
-  fi
+
+  while IFS= read -r seed_file || [ -n "$seed_file" ]; do
+    # Skip empty lines and comments
+    case "$seed_file" in
+      ''|\#*) continue ;;
+    esac
+
+    seed_path="$SEED_DIR/$seed_file"
+    if [ -f "$seed_path" ]; then
+      apply_seed_file "$seed_path"
+    else
+      echo "ERROR: seed file listed in seed-order.txt but not found: $seed_file" >&2
+      exit 1
+    fi
+  done < "$SEED_ORDER_FILE"
 }
 
 echo "Bootstrapping database..."

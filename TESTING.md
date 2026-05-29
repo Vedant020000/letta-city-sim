@@ -350,6 +350,10 @@ Expect:
 
 ## 11) Regression checklist
 
+> **Seed data changes?** Run `node scripts/validate-seeds.mjs` first.
+> See the [seed data validation checklist](CONTRIBUTING.md#seed-data-validation)
+> for the full workflow.
+
 - Unknown IDs => 404 where expected
 - Invalid payloads => 400 where expected
 - Missing `x-agent-id` on required routes => 400
