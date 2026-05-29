@@ -1,11 +1,4 @@
 import { parseCli, usage } from "./config.mjs";
-import { runConfigCommand } from "./commands/config.mjs";
-import { runDoctorCommand } from "./commands/doctor.mjs";
-import { runInteractiveCommand } from "./commands/interactive.mjs";
-import { runMockRunCommand } from "./commands/mock-run.mjs";
-import { runProfileCommand } from "./commands/profile.mjs";
-import { runRunCommand } from "./commands/run.mjs";
-import { runToolsCommand } from "./commands/tools.mjs";
 
 export async function run(argv) {
   try {
@@ -19,19 +12,23 @@ export async function run(argv) {
 
     switch (command) {
       case "run":
-        return runRunCommand({ flags });
+        return (await import("./commands/run.mjs")).runRunCommand({ flags });
       case "mock-run":
-        return runMockRunCommand({ flags });
+        return (await import("./commands/mock-run.mjs")).runMockRunCommand({ flags });
       case "interactive":
-        return runInteractiveCommand({ flags });
+        return (await import("./commands/interactive.mjs")).runInteractiveCommand({ flags });
       case "config":
-        return runConfigCommand({ subcommand, flags });
+        return (await import("./commands/config.mjs")).runConfigCommand({ subcommand, flags });
+      case "wait":
+      case "look-around":
+      case "move-to":
+        return (await import("./commands/direct.mjs")).runDirectCitizenCommand({ command, flags });
       case "profile":
-        return runProfileCommand({ subcommand, flags });
+        return (await import("./commands/profile.mjs")).runProfileCommand({ subcommand, flags });
       case "doctor":
-        return runDoctorCommand({ flags });
+        return (await import("./commands/doctor.mjs")).runDoctorCommand({ flags });
       case "tools":
-        return runToolsCommand({ subcommand, flags });
+        return (await import("./commands/tools.mjs")).runToolsCommand({ subcommand, flags });
       case "help":
         console.log(JSON.stringify({ ok: true, usage: usage() }, null, 2));
         return 0;

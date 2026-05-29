@@ -52,6 +52,11 @@ pub struct ClaimWakeQuery {
     pub wait_ms: Option<u64>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub struct WaitForInterruptQuery {
+    pub timeout_ms: Option<u64>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RespondWakeRequest {
     pub status: String,
@@ -216,6 +221,90 @@ pub async fn claim_citizen_wake(
             Ok(None) => {
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
+            Err(err) => return citizen_internal_error_response(err),
+        }
+    }
+}
+
+pub async fn wait_for_agent_interrupt(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    headers: HeaderMap,
+    Path(path_agent_id): Path<String>,
+    Query(query): Query<WaitForInterruptQuery>,
+) -> Response {
+    let Some(auth_agent_id) = auth.agent_id().map(str::to_string) else {
+        return citizen_protocol_response(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Agent wait requires bearer-token agent auth.",
+            false,
+            false,
+            None,
+        );
+    };
+
+    if auth_agent_id != path_agent_id {
+        return citizen_protocol_response(
+            StatusCode::FORBIDDEN,
+            "agent_mismatch",
+            "Path agent id does not match the authenticated citizen identity.",
+            false,
+            false,
+            None,
+        );
+    }
+
+    match required_header(&headers, HEADER_AGENT_ID) {
+        Ok(header_agent_id) if header_agent_id == auth_agent_id => {}
+        Ok(_) => {
+            return citizen_protocol_response(
+                StatusCode::FORBIDDEN,
+                "agent_mismatch",
+                "x-agent-id does not match the authenticated citizen identity.",
+                false,
+                false,
+                None,
+            );
+        }
+        Err(message) => {
+            return citizen_protocol_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                &message,
+                false,
+                false,
+                None,
+            );
+        }
+    }
+
+    let timeout_ms = query.timeout_ms.unwrap_or(30_000).min(MAX_CLAIM_WAIT_MS);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    loop {
+        match complete_agent_travel_if_ready(&state, &auth_agent_id).await {
+            Ok(Some(payload)) => {
+                return json_value_response(StatusCode::OK, json!({
+                    "status": "completed",
+                    "result": payload,
+                }));
+            }
+            Ok(None) => {}
+            Err(err) => return citizen_internal_error_response(err),
+        }
+
+        match peek_open_wake(&state, &auth_agent_id).await {
+            Ok(Some(payload)) => {
+                return json_value_response(StatusCode::OK, json!({
+                    "status": "interrupted",
+                    "interrupt": payload,
+                }));
+            }
+            Ok(None) if timeout_ms == 0 || std::time::Instant::now() >= deadline => {
+                return json_value_response(StatusCode::OK, json!({ "status": "timed_out" }));
+            }
+            Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
             Err(err) => return citizen_internal_error_response(err),
         }
     }
@@ -941,6 +1030,136 @@ fn wake_payload(wake: ClaimableWakeRow, agent_id: &str) -> AppResult<Value> {
     }))
 }
 
+async fn complete_agent_travel_if_ready(state: &AppState, agent_id: &str) -> AppResult<Option<Value>> {
+    let mut tx = state.pool().begin().await?;
+
+    let ready = sqlx::query_as::<_, (String, String, String)>(
+        r#"
+        SELECT id, current_location_id, travel_destination_id
+        FROM agents
+        WHERE id = $1
+          AND state = 'traveling'
+          AND travel_destination_id IS NOT NULL
+          AND travel_arrives_at IS NOT NULL
+          AND travel_arrives_at <= NOW()
+        FOR UPDATE
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some((id, from_location_id, _to_location_id)) = ready else {
+        tx.commit().await?;
+        return Ok(None);
+    };
+
+    let updated = sqlx::query_as::<_, crate::models::agent::Agent>(
+        r#"
+        UPDATE agents
+        SET current_location_id = travel_destination_id,
+            travel_destination_id = NULL,
+            travel_started_at = NULL,
+            travel_arrives_at = NULL,
+            travel_path = NULL,
+            travel_total_secs = NULL,
+            travel_from_location_id = NULL,
+            state = 'idle',
+            current_activity = NULL,
+            activity_started_at = NULL,
+            state_updated_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        "#,
+    )
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO events (type, actor_id, location_id, description, metadata, occurred_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        "#,
+    )
+    .bind("agent.moved")
+    .bind(&id)
+    .bind(&updated.current_location_id)
+    .bind(format!("Agent {} arrived at location {}", id, updated.current_location_id))
+    .bind(json!({
+        "from_location_id": from_location_id,
+        "to_location_id": updated.current_location_id,
+        "completion": "wait_poll",
+    }).to_string())
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(Some(json!({
+        "event_type": "travel.arrived",
+        "agent_id": id,
+        "from_location_id": from_location_id,
+        "to_location_id": updated.current_location_id,
+    })))
+}
+
+async fn peek_open_wake(state: &AppState, agent_id: &str) -> AppResult<Option<Value>> {
+    release_expired_claims(state, agent_id).await?;
+    expire_open_wake_if_needed(state, agent_id).await?;
+
+    let wake = sqlx::query_as::<_, OpenWakeRow>(
+        r#"
+        SELECT event_id, seq, wake_type, world_time, wall_time, agent_snapshot, trigger_payload,
+               prompt_narrative, prompt_structured, tools, wake_token_expires_at,
+               expects_response, dropped_for_overflow_count
+        FROM citizen_wakes
+        WHERE agent_id = $1
+          AND status = 'open'
+          AND claimed_at IS NULL
+        ORDER BY seq ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(agent_id)
+    .fetch_optional(state.pool())
+    .await?;
+
+    let Some(wake) = wake else {
+        return Ok(None);
+    };
+
+    let wake_token = derive_wake_token(
+        &wake.event_id,
+        agent_id,
+        wake.seq,
+        wake.wake_token_expires_at,
+    )?;
+
+    Ok(Some(json!({
+        "event_id": wake.event_id,
+        "seq": wake.seq,
+        "type": wake.wake_type,
+        "world_time": wake.world_time.to_rfc3339(),
+        "wall_time": wake.wall_time.to_rfc3339(),
+        "agent": wake.agent_snapshot,
+        "trigger": wake.trigger_payload,
+        "prompt": {
+            "narrative": wake.prompt_narrative,
+            "structured": wake.prompt_structured,
+        },
+        "tools": wake.tools,
+        "wake_token": wake_token,
+        "wake_token_expires_at": wake.wake_token_expires_at.to_rfc3339(),
+        "expects_response": wake.expects_response,
+        "meta": {
+            "dropped_for_overflow_count": wake.dropped_for_overflow_count,
+        }
+    })))
+}
+
 async fn release_expired_claims(state: &AppState, agent_id: &str) -> AppResult<()> {
     let mut tx = state.pool().begin().await?;
     release_expired_claims_tx(&mut tx, agent_id).await?;
@@ -1450,6 +1669,13 @@ async fn load_agent_wake_snapshot_tx(
         "citizen_id": snapshot.id,
         "display_name": snapshot.name,
         "state": agent.state,
+        "travel": {
+            "destination_id": agent.travel_destination_id,
+            "started_at": agent.travel_started_at.map(|value| value.to_rfc3339()),
+            "arrives_at": agent.travel_arrives_at.map(|value| value.to_rfc3339()),
+            "total_seconds": agent.travel_total_secs,
+            "from_location_id": agent.travel_from_location_id,
+        },
         "location": {
             "id": snapshot.current_location_id,
             "type": Value::Null,

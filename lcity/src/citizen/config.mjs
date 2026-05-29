@@ -12,6 +12,9 @@ function readFlagValue(tokens, fallback) {
 export function usage() {
   return [
     "lcity citizen run [--mode env|interactive] [--plain|--tui] [--profile <name>]",
+    "lcity citizen wait [--timeout-ms <ms>] [--profile <name>]",
+    "lcity citizen look-around [--profile <name>]",
+    "lcity citizen move-to --location-id <id> [--timeout-ms <ms>] [--wait true|false] [--profile <name>]",
     "lcity citizen mock-run --agent-id <id> --sim-key <key> [--api-base <url>] [--auto-close false] [--tui]",
     "lcity citizen config show [--profile <name>]",
     "lcity citizen config validate [--profile <name>]",

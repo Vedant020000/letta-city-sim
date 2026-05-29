@@ -60,16 +60,20 @@ export function validateResolvedConfig(resolved) {
     errors.push("world.tool_auth.sim_api_key is required when tool auth mode is sim_key");
   }
 
-  if (!isNonEmptyString(resolved.letta.agent_id.value)) {
-    errors.push("letta.agent_id is required");
-  }
+  const directCommand = ["wait", "look-around", "move-to"].includes(resolved._command || "");
 
-  if (!isNonEmptyString(resolved.letta.api_key.value)) {
-    errors.push("letta.api_key is required");
-  }
+  if (!directCommand) {
+    if (!isNonEmptyString(resolved.letta.agent_id.value)) {
+      errors.push("letta.agent_id is required");
+    }
 
-  if (!isNonEmptyString(resolved.letta.base_url.value) || !isUrl(resolved.letta.base_url.value)) {
-    errors.push("letta.base_url must be a valid URL");
+    if (!isNonEmptyString(resolved.letta.api_key.value)) {
+      errors.push("letta.api_key is required");
+    }
+
+    if (!isNonEmptyString(resolved.letta.base_url.value) || !isUrl(resolved.letta.base_url.value)) {
+      errors.push("letta.base_url must be a valid URL");
+    }
   }
 
   if (!isPositiveInteger(resolved.runtime.max_wake_iterations.value)) {
