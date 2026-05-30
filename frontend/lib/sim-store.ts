@@ -7,6 +7,8 @@ type SimAction =
   | { type: "snapshot_refreshed"; payload: BootstrapSnapshot }
   | { type: "connection_state_changed"; payload: SimConnectionState }
   | { type: "event_received"; payload: WorldEventEnvelope }
+  | { type: "mock_mode_activated"; payload: BootstrapSnapshot }
+  | { type: "mock_snapshot_ticked"; payload: BootstrapSnapshot }
   | { type: "error"; error: string };
 
 export const initialSimState: SimState = {
@@ -20,6 +22,7 @@ export const initialSimState: SimState = {
   loading: true,
   error: null,
   lastSnapshotAt: null,
+  mockMode: false,
 };
 
 function resolveEventType(event: WorldEventEnvelope) {
@@ -81,6 +84,31 @@ export function simReducer(state: SimState, action: SimAction): SimState {
         locations: action.payload.locations,
         worldTime: action.payload.worldTime,
         townPulse: action.payload.townPulse,
+        lastSnapshotAt: new Date().toISOString(),
+      };
+    case "mock_mode_activated":
+      return {
+        ...state,
+        agents: action.payload.agents,
+        currentIntentions: action.payload.currentIntentions,
+        locations: action.payload.locations,
+        worldTime: action.payload.worldTime,
+        townPulse: action.payload.townPulse,
+        recentEvents: action.payload.recentEvents,
+        loading: false,
+        error: null,
+        mockMode: true,
+        lastSnapshotAt: new Date().toISOString(),
+      };
+    case "mock_snapshot_ticked":
+      return {
+        ...state,
+        agents: action.payload.agents,
+        currentIntentions: action.payload.currentIntentions,
+        locations: action.payload.locations,
+        worldTime: action.payload.worldTime,
+        townPulse: action.payload.townPulse,
+        recentEvents: action.payload.recentEvents,
         lastSnapshotAt: new Date().toISOString(),
       };
     case "bootstrap_failed":

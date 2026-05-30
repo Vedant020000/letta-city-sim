@@ -143,4 +143,5 @@ export type SimState = {
   loading: boolean;
   error: string | null;
   lastSnapshotAt: string | null;
+  mockMode: boolean;
 };

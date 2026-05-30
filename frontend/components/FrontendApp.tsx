@@ -6,18 +6,37 @@ import { EventFeed } from "@/components/EventFeed";
 import { PhaserMap } from "@/components/PhaserMap";
 import { TownPulsePanel } from "@/components/TownPulsePanel";
 import { fetchBootstrapSnapshot, getWsUrl } from "@/lib/api";
+import { createMockSnapshotLoop, MockSnapshotLoop } from "@/lib/mock-snapshot";
 import { initialSimState, simReducer } from "@/lib/sim-store";
 import { connectWorldEvents } from "@/lib/ws-client";
-import { Agent } from "@/types/world";
 
 function formatWorldTime(value: string | null) {
   if (!value) return "—";
   return new Date(value).toLocaleString();
 }
 
+/**
+ * Returns true if the error looks like a backend/database failure that
+ * should trigger mock mode (500 status, "database error", etc.).
+ */
+function isBackendFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return true;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes("500") ||
+    msg.includes("database error") ||
+    msg.includes("failed to fetch") ||
+    msg.includes("networkerror") ||
+    msg.includes("network request failed") ||
+    msg.includes("econnrefused") ||
+    msg.includes("err_connection_refused")
+  );
+}
+
 export function FrontendApp() {
   const [state, dispatch] = useReducer(simReducer, initialSimState);
   const refreshTimerRef = useRef<number | null>(null);
+  const mockLoopRef = useRef<MockSnapshotLoop | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [showEventFeed, setShowEventFeed] = useState(false);
 
@@ -29,6 +48,29 @@ export function FrontendApp() {
     setSelectedAgentId((prev) => (prev === agentId ? null : agentId));
   }, []);
 
+  // ── Mock mode activation ──
+
+  const activateMockMode = useCallback(() => {
+    if (mockLoopRef.current) return; // already active
+    const loop = createMockSnapshotLoop();
+    mockLoopRef.current = loop;
+    dispatch({ type: "mock_mode_activated", payload: loop.getSnapshot() });
+    // Auto-tick every 8 seconds to keep the demo alive
+    loop.start(8000);
+    // Also set up an interval to dispatch ticked snapshots
+    const tickInterval = setInterval(() => {
+      if (mockLoopRef.current) {
+        dispatch({ type: "mock_snapshot_ticked", payload: mockLoopRef.current.getSnapshot() });
+      }
+    }, 8000);
+    // Store cleanup ref
+    mockTickIntervalRef.current = tickInterval;
+  }, []);
+
+  const mockTickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Snapshot loading with fallback ──
+
   const loadSnapshot = useCallback(async (mode: "bootstrap" | "refresh") => {
     try {
       if (mode === "bootstrap") {
@@ -39,9 +81,15 @@ export function FrontendApp() {
       dispatch({ type: mode === "bootstrap" ? "bootstrap_succeeded" : "snapshot_refreshed", payload: snapshot });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown snapshot error";
-      dispatch({ type: mode === "bootstrap" ? "bootstrap_failed" : "error", error: message });
+
+      // If this looks like a backend/database failure, activate mock mode
+      if (isBackendFailure(error)) {
+        activateMockMode();
+      } else {
+        dispatch({ type: mode === "bootstrap" ? "bootstrap_failed" : "error", error: message });
+      }
     }
-  }, []);
+  }, [activateMockMode]);
 
   const scheduleRefresh = useCallback(() => {
     if (refreshTimerRef.current !== null) {
@@ -58,6 +106,9 @@ export function FrontendApp() {
   }, [loadSnapshot]);
 
   useEffect(() => {
+    // Skip WS connection in mock mode
+    if (state.mockMode) return;
+
     const disconnect = connectWorldEvents({
       url: getWsUrl(),
       onOpen: () => dispatch({ type: "connection_state_changed", payload: "open" }),
@@ -78,7 +129,21 @@ export function FrontendApp() {
         window.clearTimeout(refreshTimerRef.current);
       }
     };
-  }, [scheduleRefresh]);
+  }, [scheduleRefresh, state.mockMode]);
+
+  // Cleanup mock loop on unmount
+  useEffect(() => {
+    return () => {
+      if (mockLoopRef.current) {
+        mockLoopRef.current.stop();
+        mockLoopRef.current = null;
+      }
+      if (mockTickIntervalRef.current) {
+        clearInterval(mockTickIntervalRef.current);
+        mockTickIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <main className="page">
@@ -93,6 +158,9 @@ export function FrontendApp() {
             </div>
           </div>
           <div className="top-bar-stats">
+            {state.mockMode && (
+              <span className="demo-badge">DEMO MODE</span>
+            )}
             <div className="stat-chip">
               <span className="stat-chip-label">Time</span>
               <span className="stat-chip-value">{state.worldTime ? state.worldTime.time_of_day : "—"}</span>
@@ -105,12 +173,23 @@ export function FrontendApp() {
               <span className="stat-chip-label">Locations</span>
               <span className="stat-chip-value">{state.locations.length}</span>
             </div>
-            <span className={`connection-pill ${state.connectionState}`}>{state.connectionState}</span>
+            <span className={`connection-pill ${state.mockMode ? "mock" : state.connectionState}`}>
+              {state.mockMode ? "mock" : state.connectionState}
+            </span>
           </div>
         </header>
 
+        {state.mockMode && (
+          <div className="demo-banner">
+            <span className="demo-banner-icon">&#9888;</span>
+            <span>
+              Backend unavailable — showing <strong>demo data</strong>. The simulation is not live.
+            </span>
+          </div>
+        )}
+
         {state.loading ? <div className="loading">Bootstrapping world snapshot...</div> : null}
-        {state.error ? <div className="error-box">{state.error}</div> : null}
+        {!state.mockMode && state.error ? <div className="error-box">{state.error}</div> : null}
 
         {/* Town pulse */}
         <TownPulsePanel pulse={state.townPulse} />
