@@ -18,6 +18,10 @@ export type TileCoord = {
   ty: number;
 };
 
+export type ChunkRoadTile = TileCoord & {
+  mask: number;
+};
+
 export type ChunkLocationAnchor = TileCoord & {
   location: Location;
   region: DistrictKind;
@@ -27,7 +31,7 @@ export type TownChunk = {
   key: string;
   cx: number;
   cy: number;
-  roadTiles: TileCoord[];
+  roadTiles: ChunkRoadTile[];
   locations: ChunkLocationAnchor[];
   districtKind: DistrictKind;
 };
@@ -61,6 +65,17 @@ function roadTileKey(tx: number, ty: number) {
 function parseRoadTileKey(key: string): TileCoord {
   const [tx, ty] = key.split(":").map(Number);
   return { tx, ty };
+}
+
+function roadMaskForTile(tile: TileCoord, roadTiles: Set<string>) {
+  let mask = 0;
+
+  if (roadTiles.has(roadTileKey(tile.tx, tile.ty - 1))) mask |= 1;
+  if (roadTiles.has(roadTileKey(tile.tx + 1, tile.ty))) mask |= 2;
+  if (roadTiles.has(roadTileKey(tile.tx, tile.ty + 1))) mask |= 4;
+  if (roadTiles.has(roadTileKey(tile.tx - 1, tile.ty))) mask |= 8;
+
+  return mask;
 }
 
 function median(values: number[]) {
@@ -266,7 +281,10 @@ export function buildChunkWorld(locations: Location[]): ChunkWorld {
     const cy = Math.floor(tile.ty / WORLD_CHUNK_SIZE);
     const key = chunkKey(cx, cy);
     const chunk = chunks.get(key) ?? emptyChunk(cx, cy);
-    chunk.roadTiles.push(tile);
+    chunk.roadTiles.push({
+      ...tile,
+      mask: roadMaskForTile(tile, roadTiles),
+    });
 
     if (chunk.districtKind === "wild") {
       chunk.districtKind = "residential";

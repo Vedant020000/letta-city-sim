@@ -36,6 +36,25 @@ const CHUNK_THEME: Record<DistrictKind, { base: number; alt: number; border: num
   wild: { base: 0x10261a, alt: 0x143020, border: 0x264c35, road: 0x4e594d },
 };
 
+const ROAD_MASK_TO_FRAME: Record<number, number> = {
+  0: 0,
+  1: 1,
+  2: 2,
+  3: 3,
+  4: 4,
+  5: 5,
+  6: 6,
+  7: 7,
+  8: 8,
+  9: 9,
+  10: 10,
+  11: 11,
+  12: 12,
+  13: 13,
+  14: 14,
+  15: 15,
+};
+
 function colorForAgent(agentId: string) {
   const palette = [0x3b82f6, 0xef4444, 0x22c55e, 0xa855f7, 0xf97316, 0x06b6d4, 0xec4899, 0xeab308];
   let hash = 0;
@@ -93,6 +112,10 @@ function footprintBounds(anchor: ChunkLocationAnchor) {
   };
 }
 
+function roadFrameForMask(mask: number) {
+  return ROAD_MASK_TO_FRAME[mask] ?? 0;
+}
+
 export class TownScene extends Phaser.Scene {
   private snapshot: TownSceneSnapshot = { agents: [], locations: [] };
   private chunkWorld: ChunkWorld | null = null;
@@ -115,6 +138,13 @@ export class TownScene extends Phaser.Scene {
   setSelectedAgent(agentId: string | null) {
     this.selectedAgentId = agentId;
     this.renderAgentMarkers();
+  }
+
+  preload() {
+    this.load.spritesheet("road-tiles", "/sprites/road-tiles.png", {
+      frameWidth: WORLD_TILE_SIZE,
+      frameHeight: WORLD_TILE_SIZE,
+    });
   }
 
   create() {
@@ -249,14 +279,19 @@ export class TownScene extends Phaser.Scene {
     }
     container.add(terrain);
 
-    const roads = this.add.graphics();
-    roads.fillStyle(theme.road, 0.92);
     for (const roadTile of chunk.roadTiles) {
       const localTx = roadTile.tx - chunk.cx * WORLD_CHUNK_SIZE;
       const localTy = roadTile.ty - chunk.cy * WORLD_CHUNK_SIZE;
-      roads.fillRect(localTx * WORLD_TILE_SIZE, localTy * WORLD_TILE_SIZE, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+
+      const roadSprite = this.add.image(
+        localTx * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
+        localTy * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
+        "road-tiles",
+        roadFrameForMask(roadTile.mask),
+      );
+      roadSprite.setDisplaySize(WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+      container.add(roadSprite);
     }
-    container.add(roads);
 
     const chunkLabel = this.add.text(8, 6, `chunk ${chunk.cx}:${chunk.cy}`, {
       color: "#94a3b8",
