@@ -22,14 +22,14 @@ import {
 // ── Static data ──────────────────────────────────────────────────────────────
 
 const MOCK_LOCATIONS: Location[] = [
-  { id: "loc-town-hall", name: "Town Hall", description: "The centre of civic life", map_x: 3, map_y: 2 },
-  { id: "loc-market", name: "Market Square", description: "Bustling stalls and trade", map_x: 5, map_y: 3 },
-  { id: "loc-tavern", name: "The Rusty Anchor", description: "A warm tavern by the docks", map_x: 7, map_y: 4 },
-  { id: "loc-park", name: "Central Park", description: "Green oasis in the town", map_x: 4, map_y: 5 },
-  { id: "loc-homes", name: "Residential Row", description: "Quiet neighbourhood", map_x: 2, map_y: 4 },
-  { id: "loc-library", name: "The Library", description: "Knowledge and quiet study", map_x: 6, map_y: 2 },
-  { id: "loc-farm", name: "Sunrise Farm", description: "Fields on the outskirts", map_x: 1, map_y: 1 },
-  { id: "loc-forest", name: "Forest Edge", description: "Wilderness beyond the fences", map_x: 8, map_y: 1 },
+  { id: "loc-town-hall", name: "Town Hall", description: "The centre of civic life", map_x: 3, map_y: 2, kind: "civic", capacity: 12 },
+  { id: "loc-market", name: "Market Square", description: "Bustling stalls and trade", map_x: 5, map_y: 3, kind: "business", capacity: 16 },
+  { id: "loc-tavern", name: "The Rusty Anchor", description: "A warm tavern by the docks", map_x: 7, map_y: 4, kind: "business", capacity: 10 },
+  { id: "loc-park", name: "Central Park", description: "Green oasis in the town", map_x: 4, map_y: 5, kind: "public", capacity: 20 },
+  { id: "loc-homes", name: "Residential Row", description: "Quiet neighbourhood", map_x: 2, map_y: 4, kind: "home", capacity: 8 },
+  { id: "loc-library", name: "The Library", description: "Knowledge and quiet study", map_x: 6, map_y: 2, kind: "public", capacity: 8 },
+  { id: "loc-farm", name: "Sunrise Farm", description: "Fields on the outskirts", map_x: 1, map_y: 1, kind: "workplace", capacity: 6 },
+  { id: "loc-forest", name: "Forest Edge", description: "Wilderness beyond the fences", map_x: 8, map_y: 1, kind: "public", capacity: 10 },
 ];
 
 const LOCATION_IDS = MOCK_LOCATIONS.map((l) => l.id);

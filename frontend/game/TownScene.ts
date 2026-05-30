@@ -2,10 +2,11 @@ import * as Phaser from "phaser";
 import { Agent, Location } from "@/types/world";
 import {
   buildChunkWorld,
-  ChunkLocationAnchor,
+  ChunkStructure,
   ChunkWorld,
   DistrictKind,
   LOCATION_FOOTPRINT_TILES,
+  StructureKind,
   TownChunk,
   WORLD_CHUNK_SIZE,
   WORLD_TILE_SIZE,
@@ -18,15 +19,6 @@ type TownSceneSnapshot = {
 
 const MARKER_TWEEN_MS = 700;
 
-const LOCATION_COLORS: Record<DistrictKind, { bg: number; border: number; label: string }> = {
-  residential: { bg: 0x1e3a5f, border: 0x3b82f6, label: "Residential" },
-  commercial: { bg: 0x1a3d2e, border: 0x22c55e, label: "Commercial" },
-  civic: { bg: 0x3b1f4a, border: 0xa855f7, label: "Civic" },
-  park: { bg: 0x1a3a2a, border: 0x4ade80, label: "Park" },
-  home: { bg: 0x3b2f1a, border: 0xf59e0b, label: "Home" },
-  wild: { bg: 0x16351f, border: 0x355e3b, label: "Wild" },
-};
-
 const CHUNK_THEME: Record<DistrictKind, { terrainFrames: number[]; border: number }> = {
   residential: { terrainFrames: [0, 0, 4, 1], border: 0x274864 },
   commercial: { terrainFrames: [1, 5, 9, 2, 6], border: 0x28553f },
@@ -37,22 +29,37 @@ const CHUNK_THEME: Record<DistrictKind, { terrainFrames: number[]; border: numbe
 };
 
 const ROAD_MASK_TO_FRAME: Record<number, number> = {
-  0: 0,
-  1: 1,
-  2: 2,
-  3: 3,
-  4: 4,
-  5: 5,
-  6: 6,
-  7: 7,
-  8: 8,
-  9: 9,
-  10: 10,
-  11: 11,
-  12: 12,
-  13: 13,
-  14: 14,
-  15: 15,
+  0: 0, 1: 1, 2: 2, 3: 3,
+  4: 4, 5: 5, 6: 6, 7: 7,
+  8: 8, 9: 9, 10: 10, 11: 11,
+  12: 12, 13: 13, 14: 14, 15: 15,
+};
+
+const STRUCTURE_FRAME_BY_KIND: Record<StructureKind, number> = {
+  home: 0,
+  shop: 1,
+  civic: 2,
+  workplace: 3,
+  park: 4,
+  public: 5,
+};
+
+const STRUCTURE_LABEL_BY_KIND: Record<StructureKind, string> = {
+  home: "Home",
+  shop: "Business",
+  civic: "Civic",
+  workplace: "Workplace",
+  park: "Park",
+  public: "Public",
+};
+
+const PARCEL_STYLE_BY_KIND: Record<StructureKind, { fill: number; border: number; widthTiles: number; heightTiles: number; showParcel: boolean }> = {
+  home: { fill: 0x2d2317, border: 0xf59e0b, widthTiles: 5, heightTiles: 3, showParcel: true },
+  shop: { fill: 0x1f2a20, border: 0x22c55e, widthTiles: 5, heightTiles: 3, showParcel: true },
+  civic: { fill: 0x292037, border: 0xa855f7, widthTiles: 6, heightTiles: 4, showParcel: true },
+  workplace: { fill: 0x242830, border: 0x94a3b8, widthTiles: 6, heightTiles: 4, showParcel: true },
+  park: { fill: 0x183121, border: 0x4ade80, widthTiles: 5, heightTiles: 4, showParcel: false },
+  public: { fill: 0x2b2d28, border: 0xd1d5db, widthTiles: 5, heightTiles: 3, showParcel: true },
 };
 
 function colorForAgent(agentId: string) {
@@ -97,21 +104,6 @@ function tileCenter(tx: number, ty: number) {
   };
 }
 
-function footprintBounds(anchor: ChunkLocationAnchor) {
-  const center = tileCenter(anchor.tx, anchor.ty);
-  const width = LOCATION_FOOTPRINT_TILES.width * WORLD_TILE_SIZE;
-  const height = LOCATION_FOOTPRINT_TILES.height * WORLD_TILE_SIZE;
-
-  return {
-    x: center.x - width / 2,
-    y: center.y - height / 2,
-    width,
-    height,
-    centerX: center.x,
-    centerY: center.y,
-  };
-}
-
 function roadFrameForMask(mask: number) {
   return ROAD_MASK_TO_FRAME[mask] ?? 0;
 }
@@ -120,6 +112,26 @@ function terrainFrameForTile(district: DistrictKind, tx: number, ty: number) {
   const theme = CHUNK_THEME[district] ?? CHUNK_THEME.wild;
   const hash = (((tx * 92837111) ^ (ty * 689287499) ^ ((tx + 17) * (ty + 31) * 283923)) >>> 0);
   return theme.terrainFrames[hash % theme.terrainFrames.length];
+}
+
+function parcelBoundsForStructure(structure: ChunkStructure) {
+  const style = PARCEL_STYLE_BY_KIND[structure.kind];
+  const center = tileCenter(structure.tx, structure.ty);
+  const width = style.widthTiles * WORLD_TILE_SIZE;
+  const height = style.heightTiles * WORLD_TILE_SIZE;
+  return {
+    ...style,
+    width,
+    height,
+    centerX: center.x,
+    centerY: center.y,
+  };
+}
+
+function metaLabelForStructure(structure: ChunkStructure) {
+  return structure.locationCount > 1
+    ? `${STRUCTURE_LABEL_BY_KIND[structure.kind]} · ${structure.locationCount} rooms`
+    : STRUCTURE_LABEL_BY_KIND[structure.kind];
 }
 
 export class TownScene extends Phaser.Scene {
@@ -155,6 +167,10 @@ export class TownScene extends Phaser.Scene {
       frameWidth: WORLD_TILE_SIZE,
       frameHeight: WORLD_TILE_SIZE,
     });
+    this.load.spritesheet("structure-tiles", "/sprites/structure-tiles.png", {
+      frameWidth: 48,
+      frameHeight: 48,
+    });
   }
 
   create() {
@@ -185,13 +201,11 @@ export class TownScene extends Phaser.Scene {
 
   private buildAgentsByLocation(): Map<string, Agent[]> {
     const map = new Map<string, Agent[]>();
-
     for (const agent of this.snapshot.agents) {
       const existing = map.get(agent.current_location_id) ?? [];
       existing.push(agent);
       map.set(agent.current_location_id, existing);
     }
-
     return map;
   }
 
@@ -247,7 +261,6 @@ export class TownScene extends Phaser.Scene {
         }
 
         visibleChunkKeys.add(key);
-
         if (!this.chunkContainers.has(key)) {
           const container = this.createChunkContainer(chunk);
           this.chunkLayer.add(container);
@@ -284,20 +297,9 @@ export class TownScene extends Phaser.Scene {
       }
     }
 
-    const terrainOverlay = this.add.graphics();
-    terrainOverlay.lineStyle(2, theme.border, 0.85);
-    terrainOverlay.strokeRect(0, 0, chunkPixelSize, chunkPixelSize);
-    terrainOverlay.lineStyle(1, theme.border, 0.15);
-    for (let offset = WORLD_TILE_SIZE; offset < chunkPixelSize; offset += WORLD_TILE_SIZE) {
-      terrainOverlay.lineBetween(offset, 0, offset, chunkPixelSize);
-      terrainOverlay.lineBetween(0, offset, chunkPixelSize, offset);
-    }
-    container.add(terrainOverlay);
-
     for (const roadTile of chunk.roadTiles) {
       const localTx = roadTile.tx - chunk.cx * WORLD_CHUNK_SIZE;
       const localTy = roadTile.ty - chunk.cy * WORLD_CHUNK_SIZE;
-
       const roadSprite = this.add.image(
         localTx * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
         localTy * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
@@ -308,57 +310,86 @@ export class TownScene extends Phaser.Scene {
       container.add(roadSprite);
     }
 
+    for (const structure of chunk.structures) {
+      this.renderStructure(container, chunk, structure);
+    }
+
+    const overlay = this.add.graphics();
+    overlay.lineStyle(2, theme.border, 0.85);
+    overlay.strokeRect(0, 0, chunkPixelSize, chunkPixelSize);
+    overlay.lineStyle(1, theme.border, 0.12);
+    for (let offset = WORLD_TILE_SIZE; offset < chunkPixelSize; offset += WORLD_TILE_SIZE) {
+      overlay.lineBetween(offset, 0, offset, chunkPixelSize);
+      overlay.lineBetween(0, offset, chunkPixelSize, offset);
+    }
+    container.add(overlay);
+
     const chunkLabel = this.add.text(8, 6, `chunk ${chunk.cx}:${chunk.cy}`, {
       color: "#94a3b8",
       fontSize: "10px",
       fontFamily: "Inter, Arial, sans-serif",
     });
-    chunkLabel.setAlpha(0.7);
+    chunkLabel.setAlpha(0.65);
     container.add(chunkLabel);
 
-    for (const anchor of chunk.locations) {
-      const colors = LOCATION_COLORS[anchor.region] ?? LOCATION_COLORS.residential;
-      const bounds = footprintBounds(anchor);
-      const localCenterX = bounds.centerX - chunk.cx * chunkPixelSize;
-      const localCenterY = bounds.centerY - chunk.cy * chunkPixelSize;
+    return container;
+  }
 
-      const block = this.add.rectangle(localCenterX, localCenterY, bounds.width, bounds.height, colors.bg);
-      block.setStrokeStyle(2, colors.border);
-      container.add(block);
+  private renderStructure(container: Phaser.GameObjects.Container, chunk: TownChunk, structure: ChunkStructure) {
+    const chunkPixelSize = WORLD_CHUNK_SIZE * WORLD_TILE_SIZE;
+    const parcel = parcelBoundsForStructure(structure);
+    const localCenterX = parcel.centerX - chunk.cx * chunkPixelSize;
+    const localCenterY = parcel.centerY - chunk.cy * chunkPixelSize;
 
-      const nameText = this.add.text(localCenterX, localCenterY - 10, anchor.location.name, {
-        color: "#e2e8f0",
-        fontSize: "11px",
-        fontFamily: "Inter, Arial, sans-serif",
-        fontStyle: "bold",
-        align: "center",
-        wordWrap: { width: Math.max(bounds.width - 10, 40) },
-      });
-      nameText.setOrigin(0.5, 0.5);
-      container.add(nameText);
+    if (parcel.showParcel) {
+      const pad = this.add.rectangle(localCenterX, localCenterY + 4, parcel.width, parcel.height, parcel.fill, 0.75);
+      pad.setStrokeStyle(2, parcel.border, 0.95);
+      container.add(pad);
 
-      const tag = this.add.text(localCenterX, localCenterY + 14, colors.label, {
-        color: `#${colors.border.toString(16).padStart(6, "0")}`,
-        fontSize: "9px",
-        fontFamily: "Inter, Arial, sans-serif",
-        align: "center",
-      });
-      tag.setOrigin(0.5, 0.5);
-      container.add(tag);
-
-      const anchorOutline = this.add.rectangle(
-        (anchor.tx - chunk.cx * WORLD_CHUNK_SIZE) * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
-        (anchor.ty - chunk.cy * WORLD_CHUNK_SIZE) * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
-        WORLD_TILE_SIZE,
-        WORLD_TILE_SIZE,
-        colors.border,
-        0.18,
-      );
-      anchorOutline.setStrokeStyle(1, colors.border, 0.55);
-      container.add(anchorOutline);
+      const walkway = this.add.rectangle(localCenterX, localCenterY + parcel.height / 2 - WORLD_TILE_SIZE / 2, WORLD_TILE_SIZE, WORLD_TILE_SIZE, parcel.border, 0.18);
+      walkway.setStrokeStyle(1, parcel.border, 0.45);
+      container.add(walkway);
     }
 
-    return container;
+    const structureSprite = this.add.image(
+      localCenterX,
+      localCenterY - (structure.kind === "park" ? 4 : 8),
+      "structure-tiles",
+      STRUCTURE_FRAME_BY_KIND[structure.kind],
+    );
+    structureSprite.setOrigin(0.5, 0.5);
+    container.add(structureSprite);
+
+    if (structure.locationCount > 1) {
+      const roomDots = this.add.graphics();
+      roomDots.fillStyle(0xe2e8f0, 0.9);
+      const dotSpacing = 7;
+      const startX = localCenterX - ((structure.locationCount - 1) * dotSpacing) / 2;
+      for (let index = 0; index < structure.locationCount; index += 1) {
+        roomDots.fillCircle(startX + index * dotSpacing, localCenterY + 16, 1.5);
+      }
+      container.add(roomDots);
+    }
+
+    const nameText = this.add.text(localCenterX, localCenterY + 26, structure.label, {
+      color: "#e2e8f0",
+      fontSize: "11px",
+      fontFamily: "Inter, Arial, sans-serif",
+      fontStyle: "bold",
+      align: "center",
+      wordWrap: { width: Math.max(LOCATION_FOOTPRINT_TILES.width * WORLD_TILE_SIZE, 72) },
+    });
+    nameText.setOrigin(0.5, 0.5);
+    container.add(nameText);
+
+    const metaText = this.add.text(localCenterX, localCenterY + 40, metaLabelForStructure(structure), {
+      color: "#94a3b8",
+      fontSize: "9px",
+      fontFamily: "Inter, Arial, sans-serif",
+      align: "center",
+    });
+    metaText.setOrigin(0.5, 0.5);
+    container.add(metaText);
   }
 
   private renderAgentMarkers() {

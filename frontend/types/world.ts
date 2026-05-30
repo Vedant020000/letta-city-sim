@@ -54,6 +54,8 @@ export type Location = {
   description: string;
   map_x: number;
   map_y: number;
+  kind: string;
+  capacity?: number | null;
 };
 
 export type WorldTime = {
