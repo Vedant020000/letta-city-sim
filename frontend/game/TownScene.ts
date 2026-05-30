@@ -27,13 +27,13 @@ const LOCATION_COLORS: Record<DistrictKind, { bg: number; border: number; label:
   wild: { bg: 0x16351f, border: 0x355e3b, label: "Wild" },
 };
 
-const CHUNK_THEME: Record<DistrictKind, { base: number; alt: number; border: number; road: number }> = {
-  residential: { base: 0x13283c, alt: 0x173149, border: 0x274864, road: 0x46515f },
-  commercial: { base: 0x162f24, alt: 0x1b3a2c, border: 0x28553f, road: 0x4a5560 },
-  civic: { base: 0x2a1f37, alt: 0x352747, border: 0x55406d, road: 0x4f5868 },
-  park: { base: 0x133220, alt: 0x173f27, border: 0x2d6b40, road: 0x59614f },
-  home: { base: 0x382717, alt: 0x43321e, border: 0x75511e, road: 0x60574d },
-  wild: { base: 0x10261a, alt: 0x143020, border: 0x264c35, road: 0x4e594d },
+const CHUNK_THEME: Record<DistrictKind, { terrainFrames: number[]; border: number }> = {
+  residential: { terrainFrames: [0, 0, 4, 1], border: 0x274864 },
+  commercial: { terrainFrames: [1, 5, 9, 2, 6], border: 0x28553f },
+  civic: { terrainFrames: [10, 10, 11, 9, 6], border: 0x55406d },
+  park: { terrainFrames: [8, 8, 13, 12, 4], border: 0x2d6b40 },
+  home: { terrainFrames: [0, 4, 0, 2], border: 0x75511e },
+  wild: { terrainFrames: [0, 4, 8, 12, 13], border: 0x264c35 },
 };
 
 const ROAD_MASK_TO_FRAME: Record<number, number> = {
@@ -116,6 +116,12 @@ function roadFrameForMask(mask: number) {
   return ROAD_MASK_TO_FRAME[mask] ?? 0;
 }
 
+function terrainFrameForTile(district: DistrictKind, tx: number, ty: number) {
+  const theme = CHUNK_THEME[district] ?? CHUNK_THEME.wild;
+  const hash = (((tx * 92837111) ^ (ty * 689287499) ^ ((tx + 17) * (ty + 31) * 283923)) >>> 0);
+  return theme.terrainFrames[hash % theme.terrainFrames.length];
+}
+
 export class TownScene extends Phaser.Scene {
   private snapshot: TownSceneSnapshot = { agents: [], locations: [] };
   private chunkWorld: ChunkWorld | null = null;
@@ -142,6 +148,10 @@ export class TownScene extends Phaser.Scene {
 
   preload() {
     this.load.spritesheet("road-tiles", "/sprites/road-tiles.png", {
+      frameWidth: WORLD_TILE_SIZE,
+      frameHeight: WORLD_TILE_SIZE,
+    });
+    this.load.spritesheet("terrain-tiles", "/sprites/terrain-tiles.png", {
       frameWidth: WORLD_TILE_SIZE,
       frameHeight: WORLD_TILE_SIZE,
     });
@@ -259,25 +269,30 @@ export class TownScene extends Phaser.Scene {
     const container = this.add.container(chunk.cx * chunkPixelSize, chunk.cy * chunkPixelSize);
     const theme = CHUNK_THEME[chunk.districtKind] ?? CHUNK_THEME.wild;
 
-    const terrain = this.add.graphics();
     for (let localTy = 0; localTy < WORLD_CHUNK_SIZE; localTy += 1) {
       for (let localTx = 0; localTx < WORLD_CHUNK_SIZE; localTx += 1) {
         const worldTx = chunk.cx * WORLD_CHUNK_SIZE + localTx;
         const worldTy = chunk.cy * WORLD_CHUNK_SIZE + localTy;
-        const isAlt = (worldTx + worldTy) % 2 === 0;
-        terrain.fillStyle(isAlt ? theme.alt : theme.base, 1);
-        terrain.fillRect(localTx * WORLD_TILE_SIZE, localTy * WORLD_TILE_SIZE, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+        const terrainTile = this.add.image(
+          localTx * WORLD_TILE_SIZE,
+          localTy * WORLD_TILE_SIZE,
+          "terrain-tiles",
+          terrainFrameForTile(chunk.districtKind, worldTx, worldTy),
+        );
+        terrainTile.setOrigin(0, 0);
+        container.add(terrainTile);
       }
     }
 
-    terrain.lineStyle(2, theme.border, 0.85);
-    terrain.strokeRect(0, 0, chunkPixelSize, chunkPixelSize);
-    terrain.lineStyle(1, theme.border, 0.15);
+    const terrainOverlay = this.add.graphics();
+    terrainOverlay.lineStyle(2, theme.border, 0.85);
+    terrainOverlay.strokeRect(0, 0, chunkPixelSize, chunkPixelSize);
+    terrainOverlay.lineStyle(1, theme.border, 0.15);
     for (let offset = WORLD_TILE_SIZE; offset < chunkPixelSize; offset += WORLD_TILE_SIZE) {
-      terrain.lineBetween(offset, 0, offset, chunkPixelSize);
-      terrain.lineBetween(0, offset, chunkPixelSize, offset);
+      terrainOverlay.lineBetween(offset, 0, offset, chunkPixelSize);
+      terrainOverlay.lineBetween(0, offset, chunkPixelSize, offset);
     }
-    container.add(terrain);
+    container.add(terrainOverlay);
 
     for (const roadTile of chunk.roadTiles) {
       const localTx = roadTile.tx - chunk.cx * WORLD_CHUNK_SIZE;
