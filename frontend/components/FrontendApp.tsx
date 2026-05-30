@@ -1,19 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { AgentInspector } from "@/components/AgentInspector";
-import { EventFeed } from "@/components/EventFeed";
 import { PhaserMap } from "@/components/PhaserMap";
-import { TownPulsePanel } from "@/components/TownPulsePanel";
 import { fetchBootstrapSnapshot, getWsUrl } from "@/lib/api";
 import { createMockSnapshotLoop, MockSnapshotLoop } from "@/lib/mock-snapshot";
 import { initialSimState, simReducer } from "@/lib/sim-store";
 import { connectWorldEvents } from "@/lib/ws-client";
-
-function formatWorldTime(value: string | null) {
-  if (!value) return "—";
-  return new Date(value).toLocaleString();
-}
 
 /**
  * Returns true if the error looks like a backend/database failure that
@@ -38,11 +30,6 @@ export function FrontendApp() {
   const refreshTimerRef = useRef<number | null>(null);
   const mockLoopRef = useRef<MockSnapshotLoop | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const [showEventFeed, setShowEventFeed] = useState(false);
-
-  const selectedAgent = selectedAgentId
-    ? state.agents.find((a) => a.id === selectedAgentId) ?? null
-    : null;
 
   const handleAgentClick = useCallback((agentId: string) => {
     setSelectedAgentId((prev) => (prev === agentId ? null : agentId));
@@ -146,136 +133,11 @@ export function FrontendApp() {
   }, []);
 
   return (
-    <main className="page">
-      <div className="shell">
-        {/* Compact header */}
-        <header className="top-bar">
-          <div className="top-bar-left">
-            <span className="logo">⬡</span>
-            <div>
-              <h1>letta-city-sim</h1>
-              <span className="top-bar-subtitle">autonomous AI agents in a living town</span>
-            </div>
-          </div>
-          <div className="top-bar-stats">
-            {state.mockMode && (
-              <span className="demo-badge">DEMO MODE</span>
-            )}
-            <div className="stat-chip">
-              <span className="stat-chip-label">Time</span>
-              <span className="stat-chip-value">{state.worldTime ? state.worldTime.time_of_day : "—"}</span>
-            </div>
-            <div className="stat-chip">
-              <span className="stat-chip-label">Agents</span>
-              <span className="stat-chip-value">{state.agents.length}</span>
-            </div>
-            <div className="stat-chip">
-              <span className="stat-chip-label">Locations</span>
-              <span className="stat-chip-value">{state.locations.length}</span>
-            </div>
-            <span className={`connection-pill ${state.mockMode ? "mock" : state.connectionState}`}>
-              {state.mockMode ? "mock" : state.connectionState}
-            </span>
-          </div>
-        </header>
-
-        {state.mockMode && (
-          <div className="demo-banner">
-            <span className="demo-banner-icon">&#9888;</span>
-            <span>
-              Backend unavailable — showing <strong>demo data</strong>. The simulation is not live.
-            </span>
-          </div>
-        )}
-
-        {state.loading ? <div className="loading">Bootstrapping world snapshot...</div> : null}
-        {!state.mockMode && state.error ? <div className="error-box">{state.error}</div> : null}
-
-        {/* Town pulse */}
-        <TownPulsePanel pulse={state.townPulse} />
-
-        {/* Main layout: map + sidebar */}
-        <div className="layout-grid">
-          <div className="column">
-            <section className="map-shell">
-              <div className="map-shell-header">
-                <div className="map-shell-title">
-                  <strong>Town view</strong>
-                  <span>Click an agent to inspect</span>
-                </div>
-              </div>
-              <div className="map-frame">
-                <PhaserMap
-                  agents={state.agents}
-                  locations={state.locations}
-                  onAgentClick={handleAgentClick}
-                  selectedAgentId={selectedAgentId}
-                />
-              </div>
-            </section>
-
-            {/* Agent roster — compact */}
-            <section className="panel">
-              <div className="panel-header">
-                <h2>Agents</h2>
-                <button
-                  className={`toggle-btn ${showEventFeed ? "active" : ""}`}
-                  onClick={() => setShowEventFeed(!showEventFeed)}
-                >
-                  {showEventFeed ? "Hide events" : "Show events"}
-                </button>
-              </div>
-              <div className="agent-list">
-                {state.agents.map((agent) => (
-                  <div
-                    className={`agent-row ${selectedAgentId === agent.id ? "selected" : ""}`}
-                    key={agent.id}
-                    onClick={() => handleAgentClick(agent.id)}
-                  >
-                    <div className="agent-row-left">
-                      <span className="agent-dot" style={{ background: `#${colorForAgentHex(agent.id)}` }} />
-                      <div>
-                        <strong>{agent.name}</strong>
-                        <small>{agent.occupation}</small>
-                      </div>
-                    </div>
-                    <div className="agent-row-right">
-                      <span className={`state-badge small ${agent.state}`}>{agent.state}</span>
-                      {agent.current_activity && <small>{agent.current_activity}</small>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <div className="column sidebar">
-            {selectedAgent ? (
-              <AgentInspector agent={selectedAgent} onClose={() => setSelectedAgentId(null)} />
-            ) : (
-              <section className="panel inspector-empty">
-                <p className="muted">Click an agent on the map or in the roster to inspect them.</p>
-              </section>
-            )}
-
-            {showEventFeed && (
-              <section className="panel">
-                <h2>Event stream</h2>
-                <EventFeed events={state.recentEvents} />
-              </section>
-            )}
-          </div>
-        </div>
-      </div>
-    </main>
+    <PhaserMap
+      agents={state.agents}
+      locations={state.locations}
+      onAgentClick={handleAgentClick}
+      selectedAgentId={selectedAgentId}
+    />
   );
-}
-
-function colorForAgentHex(agentId: string) {
-  const palette = ["3b82f6", "ef4444", "22c55e", "a855f7", "f97316", "06b6d4", "ec4899", "eab308"];
-  let hash = 0;
-  for (const char of agentId) {
-    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  }
-  return palette[hash % palette.length];
 }
