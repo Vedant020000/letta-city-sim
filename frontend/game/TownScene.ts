@@ -1,42 +1,40 @@
 import * as Phaser from "phaser";
 import { Agent, Location } from "@/types/world";
+import {
+  buildChunkWorld,
+  ChunkLocationAnchor,
+  ChunkWorld,
+  DistrictKind,
+  LOCATION_FOOTPRINT_TILES,
+  TownChunk,
+  WORLD_CHUNK_SIZE,
+  WORLD_TILE_SIZE,
+} from "@/lib/chunk-world";
 
 type TownSceneSnapshot = {
   agents: Agent[];
   locations: Location[];
 };
 
-type LocationAnchor = {
-  location: Location;
-  x: number;
-  y: number;
-};
-
-const PADDING_X = 120;
-const PADDING_Y = 80;
-const TILE_W = 110;
-const TILE_H = 72;
 const MARKER_TWEEN_MS = 700;
 
-// Region colors — warm, distinct, readable on dark
-const REGION_COLORS: Record<string, { bg: number; border: number; label: string }> = {
+const LOCATION_COLORS: Record<DistrictKind, { bg: number; border: number; label: string }> = {
   residential: { bg: 0x1e3a5f, border: 0x3b82f6, label: "Residential" },
-  commercial:  { bg: 0x1a3d2e, border: 0x22c55e, label: "Commercial" },
-  civic:       { bg: 0x3b1f4a, border: 0xa855f7, label: "Civic" },
-  park:        { bg: 0x1a3a2a, border: 0x4ade80, label: "Park" },
-  home:        { bg: 0x3b2f1a, border: 0xf59e0b, label: "Home" },
-  default:     { bg: 0x1e293b, border: 0x64748b, label: "" },
+  commercial: { bg: 0x1a3d2e, border: 0x22c55e, label: "Commercial" },
+  civic: { bg: 0x3b1f4a, border: 0xa855f7, label: "Civic" },
+  park: { bg: 0x1a3a2a, border: 0x4ade80, label: "Park" },
+  home: { bg: 0x3b2f1a, border: 0xf59e0b, label: "Home" },
+  wild: { bg: 0x16351f, border: 0x355e3b, label: "Wild" },
 };
 
-function regionForLocation(location: Location) {
-  const id = location.id;
-  const name = location.name.toLowerCase();
-  if (id.startsWith("lin_") || id.startsWith("home_")) return "home";
-  if (name.includes("cafe") || name.includes("shop") || name.includes("store") || name.includes("grocery") || name.includes("bakery") || name.includes("market")) return "commercial";
-  if (name.includes("park") || name.includes("garden") || name.includes("campground")) return "park";
-  if (name.includes("hall") || name.includes("dorm") || name.includes("clinic") || name.includes("bank") || name.includes("motel") || name.includes("library")) return "civic";
-  return "residential";
-}
+const CHUNK_THEME: Record<DistrictKind, { base: number; alt: number; border: number; road: number }> = {
+  residential: { base: 0x13283c, alt: 0x173149, border: 0x274864, road: 0x46515f },
+  commercial: { base: 0x162f24, alt: 0x1b3a2c, border: 0x28553f, road: 0x4a5560 },
+  civic: { base: 0x2a1f37, alt: 0x352747, border: 0x55406d, road: 0x4f5868 },
+  park: { base: 0x133220, alt: 0x173f27, border: 0x2d6b40, road: 0x59614f },
+  home: { base: 0x382717, alt: 0x43321e, border: 0x75511e, road: 0x60574d },
+  wild: { base: 0x10261a, alt: 0x143020, border: 0x264c35, road: 0x4e594d },
+};
 
 function colorForAgent(agentId: string) {
   const palette = [0x3b82f6, 0xef4444, 0x22c55e, 0xa855f7, 0xf97316, 0x06b6d4, 0xec4899, 0xeab308];
@@ -56,20 +54,52 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-function stateIcon(state: string): string {
+function stateIcon(state: string) {
   switch (state) {
-    case "sleeping": return "💤";
-    case "idle": return "◦";
-    case "walking": return "→";
-    default: return "•";
+    case "sleeping":
+      return "Z";
+    case "idle":
+      return ".";
+    case "walking":
+      return ">";
+    default:
+      return "*";
   }
+}
+
+function chunkKey(cx: number, cy: number) {
+  return `${cx}:${cy}`;
+}
+
+function tileCenter(tx: number, ty: number) {
+  return {
+    x: tx * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
+    y: ty * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
+  };
+}
+
+function footprintBounds(anchor: ChunkLocationAnchor) {
+  const center = tileCenter(anchor.tx, anchor.ty);
+  const width = LOCATION_FOOTPRINT_TILES.width * WORLD_TILE_SIZE;
+  const height = LOCATION_FOOTPRINT_TILES.height * WORLD_TILE_SIZE;
+
+  return {
+    x: center.x - width / 2,
+    y: center.y - height / 2,
+    width,
+    height,
+    centerX: center.x,
+    centerY: center.y,
+  };
 }
 
 export class TownScene extends Phaser.Scene {
   private snapshot: TownSceneSnapshot = { agents: [], locations: [] };
+  private chunkWorld: ChunkWorld | null = null;
   private worldLayer!: Phaser.GameObjects.Container;
-  private staticLayer!: Phaser.GameObjects.Container;
+  private chunkLayer!: Phaser.GameObjects.Container;
   private markerLayer!: Phaser.GameObjects.Container;
+  private chunkContainers = new Map<string, Phaser.GameObjects.Container>();
   private agentMarkers = new Map<string, Phaser.GameObjects.Container>();
   private selectedAgentId: string | null = null;
   private onAgentClick: ((agentId: string) => void) | null = null;
@@ -84,164 +114,222 @@ export class TownScene extends Phaser.Scene {
 
   setSelectedAgent(agentId: string | null) {
     this.selectedAgentId = agentId;
-    this.renderAgentMarkers(
-      this.buildLocationAnchors(),
-      this.buildAgentsByLocation(),
-    );
+    this.renderAgentMarkers();
   }
 
   create() {
-    this.cameras.main.setBackgroundColor("#0f172a");
+    this.cameras.main.setBackgroundColor("#0b1220");
+    this.cameras.main.roundPixels = true;
     this.worldLayer = this.add.container(0, 0);
-    this.staticLayer = this.add.container(0, 0);
+    this.chunkLayer = this.add.container(0, 0);
     this.markerLayer = this.add.container(0, 0);
-    this.worldLayer.add([this.staticLayer, this.markerLayer]);
+    this.worldLayer.add([this.chunkLayer, this.markerLayer]);
+
     this.scale.on("resize", this.renderSnapshot, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off("resize", this.renderSnapshot, this);
     });
+
     this.renderSnapshot();
   }
 
   applySnapshot(snapshot: TownSceneSnapshot) {
     this.snapshot = snapshot;
+    this.chunkWorld = buildChunkWorld(snapshot.locations);
+    this.clearRenderedChunks();
+
     if (this.worldLayer) {
       this.renderSnapshot();
     }
   }
 
-  private buildLocationAnchors(): LocationAnchor[] {
-    const { locations } = this.snapshot;
-    if (locations.length === 0) return [];
-
-    const minX = Math.min(...locations.map((l) => l.map_x));
-    const maxX = Math.max(...locations.map((l) => l.map_x));
-    const minY = Math.min(...locations.map((l) => l.map_y));
-    const maxY = Math.max(...locations.map((l) => l.map_y));
-
-    const viewportWidth = this.scale.width || this.game.canvas.width || 960;
-    const viewportHeight = this.scale.height || this.game.canvas.height || 620;
-    const spreadX = Math.max(maxX - minX, 1);
-    const spreadY = Math.max(maxY - minY, 1);
-    const availableWidth = Math.max(viewportWidth - PADDING_X * 2, 1);
-    const availableHeight = Math.max(viewportHeight - PADDING_Y * 2, 1);
-    const mapScale = Math.min(availableWidth / spreadX, availableHeight / spreadY, 1);
-
-    return locations.map((location) => ({
-      location,
-      x: (location.map_x - minX) * mapScale + PADDING_X,
-      y: (location.map_y - minY) * mapScale + PADDING_Y,
-    }));
-  }
-
   private buildAgentsByLocation(): Map<string, Agent[]> {
     const map = new Map<string, Agent[]>();
+
     for (const agent of this.snapshot.agents) {
-      const existing = map.get(agent.current_location_id) || [];
+      const existing = map.get(agent.current_location_id) ?? [];
       existing.push(agent);
       map.set(agent.current_location_id, existing);
     }
+
     return map;
   }
 
   private renderSnapshot() {
-    if (!this.staticLayer || !this.markerLayer) return;
-    this.staticLayer.removeAll(true);
+    if (!this.chunkLayer || !this.markerLayer) {
+      return;
+    }
 
-    const { locations } = this.snapshot;
-    if (locations.length === 0) {
+    if (!this.chunkWorld || this.chunkWorld.chunks.size === 0) {
+      this.clearRenderedChunks();
       this.clearAgentMarkers();
       return;
     }
 
-    const viewportWidth = this.scale.width || this.game.canvas.width || 960;
-    const viewportHeight = this.scale.height || this.game.canvas.height || 620;
-    this.cameras.main.setBounds(0, 0, viewportWidth, viewportHeight);
+    this.configureCamera();
+    this.renderVisibleChunks();
+    this.renderAgentMarkers();
+  }
 
-    // Dark background
-    const bg = this.add.rectangle(viewportWidth / 2, viewportHeight / 2, viewportWidth, viewportHeight, 0x0f172a);
-    this.staticLayer.add(bg);
-
-    // Subtle grid
-    const grid = this.add.graphics();
-    grid.lineStyle(1, 0x1e293b, 0.6);
-    for (let x = 0; x < viewportWidth; x += 64) {
-      grid.lineBetween(x, 0, x, viewportHeight);
+  private configureCamera() {
+    if (!this.chunkWorld) {
+      return;
     }
-    for (let y = 0; y < viewportHeight; y += 64) {
-      grid.lineBetween(0, y, viewportWidth, y);
+
+    const worldWidth = (this.chunkWorld.maxTx + 2) * WORLD_TILE_SIZE;
+    const worldHeight = (this.chunkWorld.maxTy + 2) * WORLD_TILE_SIZE;
+    this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+
+    const worldCenterX = ((this.chunkWorld.minTx + this.chunkWorld.maxTx + 1) * WORLD_TILE_SIZE) / 2;
+    const worldCenterY = ((this.chunkWorld.minTy + this.chunkWorld.maxTy + 1) * WORLD_TILE_SIZE) / 2;
+    this.cameras.main.centerOn(worldCenterX, worldCenterY);
+  }
+
+  private renderVisibleChunks() {
+    if (!this.chunkWorld) {
+      return;
     }
-    this.staticLayer.add(grid);
 
-    const locationAnchors = this.buildLocationAnchors();
+    const chunkPixelSize = WORLD_CHUNK_SIZE * WORLD_TILE_SIZE;
+    const worldView = this.cameras.main.worldView;
+    const minCx = Math.max(this.chunkWorld.minCx, Math.floor(worldView.left / chunkPixelSize) - 1);
+    const maxCx = Math.min(this.chunkWorld.maxCx, Math.floor(worldView.right / chunkPixelSize) + 1);
+    const minCy = Math.max(this.chunkWorld.minCy, Math.floor(worldView.top / chunkPixelSize) - 1);
+    const maxCy = Math.min(this.chunkWorld.maxCy, Math.floor(worldView.bottom / chunkPixelSize) + 1);
 
-    // Draw adjacency lines between nearby locations
-    const lines = this.add.graphics();
-    lines.lineStyle(2, 0x334155, 0.5);
-    for (let i = 0; i < locationAnchors.length; i++) {
-      for (let j = i + 1; j < locationAnchors.length; j++) {
-        const a = locationAnchors[i];
-        const b = locationAnchors[j];
-        const dist = Phaser.Math.Distance.Between(a.x, a.y, b.x, b.y);
-        if (dist < 200) {
-          lines.lineBetween(a.x, a.y, b.x, b.y);
+    const visibleChunkKeys = new Set<string>();
+    for (let cy = minCy; cy <= maxCy; cy += 1) {
+      for (let cx = minCx; cx <= maxCx; cx += 1) {
+        const key = chunkKey(cx, cy);
+        const chunk = this.chunkWorld.chunks.get(key);
+        if (!chunk) {
+          continue;
+        }
+
+        visibleChunkKeys.add(key);
+
+        if (!this.chunkContainers.has(key)) {
+          const container = this.createChunkContainer(chunk);
+          this.chunkLayer.add(container);
+          this.chunkContainers.set(key, container);
         }
       }
     }
-    this.staticLayer.add(lines);
 
-    // Draw location tiles
-    for (const { location, x, y } of locationAnchors) {
-      const region = regionForLocation(location);
-      const colors = REGION_COLORS[region] || REGION_COLORS.default;
+    for (const [key, container] of this.chunkContainers.entries()) {
+      if (!visibleChunkKeys.has(key)) {
+        container.destroy(true);
+        this.chunkContainers.delete(key);
+      }
+    }
+  }
 
-      // Tile background
-      const tile = this.add.rectangle(x, y, TILE_W, TILE_H, colors.bg);
-      tile.setStrokeStyle(3, colors.border);
-      this.staticLayer.add(tile);
+  private createChunkContainer(chunk: TownChunk) {
+    const chunkPixelSize = WORLD_CHUNK_SIZE * WORLD_TILE_SIZE;
+    const container = this.add.container(chunk.cx * chunkPixelSize, chunk.cy * chunkPixelSize);
+    const theme = CHUNK_THEME[chunk.districtKind] ?? CHUNK_THEME.wild;
 
-      // Location name — prominent, readable
-      const nameText = this.add.text(x, y - 14, location.name, {
-        color: "#e2e8f0",
-        fontSize: "13px",
-        fontFamily: "Inter, Arial, sans-serif",
-        fontStyle: "bold",
-        align: "center",
-        wordWrap: { width: TILE_W - 12 },
-      });
-      nameText.setOrigin(0.5, 0.5);
-      this.staticLayer.add(nameText);
-
-      // Region tag — small, muted
-      if (colors.label) {
-        const tag = this.add.text(x, y + 16, colors.label, {
-          color: `#${colors.border.toString(16).padStart(6, "0")}`,
-          fontSize: "9px",
-          fontFamily: "Inter, Arial, sans-serif",
-          align: "center",
-        });
-        tag.setOrigin(0.5, 0.5);
-        this.staticLayer.add(tag);
+    const terrain = this.add.graphics();
+    for (let localTy = 0; localTy < WORLD_CHUNK_SIZE; localTy += 1) {
+      for (let localTx = 0; localTx < WORLD_CHUNK_SIZE; localTx += 1) {
+        const worldTx = chunk.cx * WORLD_CHUNK_SIZE + localTx;
+        const worldTy = chunk.cy * WORLD_CHUNK_SIZE + localTy;
+        const isAlt = (worldTx + worldTy) % 2 === 0;
+        terrain.fillStyle(isAlt ? theme.alt : theme.base, 1);
+        terrain.fillRect(localTx * WORLD_TILE_SIZE, localTy * WORLD_TILE_SIZE, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
       }
     }
 
-    const agentsByLocation = this.buildAgentsByLocation();
-    this.renderAgentMarkers(locationAnchors, agentsByLocation);
+    terrain.lineStyle(2, theme.border, 0.85);
+    terrain.strokeRect(0, 0, chunkPixelSize, chunkPixelSize);
+    terrain.lineStyle(1, theme.border, 0.15);
+    for (let offset = WORLD_TILE_SIZE; offset < chunkPixelSize; offset += WORLD_TILE_SIZE) {
+      terrain.lineBetween(offset, 0, offset, chunkPixelSize);
+      terrain.lineBetween(0, offset, chunkPixelSize, offset);
+    }
+    container.add(terrain);
+
+    const roads = this.add.graphics();
+    roads.fillStyle(theme.road, 0.92);
+    for (const roadTile of chunk.roadTiles) {
+      const localTx = roadTile.tx - chunk.cx * WORLD_CHUNK_SIZE;
+      const localTy = roadTile.ty - chunk.cy * WORLD_CHUNK_SIZE;
+      roads.fillRect(localTx * WORLD_TILE_SIZE, localTy * WORLD_TILE_SIZE, WORLD_TILE_SIZE, WORLD_TILE_SIZE);
+    }
+    container.add(roads);
+
+    const chunkLabel = this.add.text(8, 6, `chunk ${chunk.cx}:${chunk.cy}`, {
+      color: "#94a3b8",
+      fontSize: "10px",
+      fontFamily: "Inter, Arial, sans-serif",
+    });
+    chunkLabel.setAlpha(0.7);
+    container.add(chunkLabel);
+
+    for (const anchor of chunk.locations) {
+      const colors = LOCATION_COLORS[anchor.region] ?? LOCATION_COLORS.residential;
+      const bounds = footprintBounds(anchor);
+      const localCenterX = bounds.centerX - chunk.cx * chunkPixelSize;
+      const localCenterY = bounds.centerY - chunk.cy * chunkPixelSize;
+
+      const block = this.add.rectangle(localCenterX, localCenterY, bounds.width, bounds.height, colors.bg);
+      block.setStrokeStyle(2, colors.border);
+      container.add(block);
+
+      const nameText = this.add.text(localCenterX, localCenterY - 10, anchor.location.name, {
+        color: "#e2e8f0",
+        fontSize: "11px",
+        fontFamily: "Inter, Arial, sans-serif",
+        fontStyle: "bold",
+        align: "center",
+        wordWrap: { width: Math.max(bounds.width - 10, 40) },
+      });
+      nameText.setOrigin(0.5, 0.5);
+      container.add(nameText);
+
+      const tag = this.add.text(localCenterX, localCenterY + 14, colors.label, {
+        color: `#${colors.border.toString(16).padStart(6, "0")}`,
+        fontSize: "9px",
+        fontFamily: "Inter, Arial, sans-serif",
+        align: "center",
+      });
+      tag.setOrigin(0.5, 0.5);
+      container.add(tag);
+
+      const anchorOutline = this.add.rectangle(
+        (anchor.tx - chunk.cx * WORLD_CHUNK_SIZE) * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
+        (anchor.ty - chunk.cy * WORLD_CHUNK_SIZE) * WORLD_TILE_SIZE + WORLD_TILE_SIZE / 2,
+        WORLD_TILE_SIZE,
+        WORLD_TILE_SIZE,
+        colors.border,
+        0.18,
+      );
+      anchorOutline.setStrokeStyle(1, colors.border, 0.55);
+      container.add(anchorOutline);
+    }
+
+    return container;
   }
 
-  private renderAgentMarkers(
-    locationAnchors: LocationAnchor[],
-    agentsByLocation: Map<string, Agent[]>,
-  ) {
-    const seenAgents = new Set<string>();
+  private renderAgentMarkers() {
+    if (!this.chunkWorld) {
+      this.clearAgentMarkers();
+      return;
+    }
 
-    for (const { location, x, y } of locationAnchors) {
-      const locationAgents = agentsByLocation.get(location.id) || [];
+    const agentsByLocation = this.buildAgentsByLocation();
+    const seenAgents = new Set<string>();
+    const markerBaseOffsetY = (LOCATION_FOOTPRINT_TILES.height * WORLD_TILE_SIZE) / 2 + 12;
+
+    for (const anchor of this.chunkWorld.anchorsByLocationId.values()) {
+      const locationAgents = agentsByLocation.get(anchor.location.id) ?? [];
+      const center = tileCenter(anchor.tx, anchor.ty);
+
       locationAgents.forEach((agent, index) => {
-        const offsetX = -22 + (index % 3) * 22;
-        const offsetY = TILE_H / 2 + 14 + (index >= 3 ? 24 : 0);
+        const offsetX = -20 + (index % 3) * 20;
+        const offsetY = markerBaseOffsetY + Math.floor(index / 3) * 22;
         seenAgents.add(agent.id);
-        this.upsertAgentMarker(agent, x + offsetX, y + offsetY);
+        this.upsertAgentMarker(agent, center.x + offsetX, center.y + offsetY);
       });
     }
 
@@ -261,27 +349,27 @@ export class TownScene extends Phaser.Scene {
     if (!marker) {
       marker = this.add.container(x, y);
 
-      const circle = this.add.circle(0, 0, 12, colorForAgent(agent.id));
-      circle.setStrokeStyle(2, 0x0f172a);
+      const circle = this.add.circle(0, 0, 10, colorForAgent(agent.id));
+      circle.setStrokeStyle(isSelected ? 4 : 2, isSelected ? 0xfbbf24 : 0x0f172a);
       marker.add(circle);
 
       const initials = this.add.text(0, 0, getInitials(agent.name), {
         color: "#ffffff",
-        fontSize: "10px",
+        fontSize: "9px",
         fontFamily: "Inter, Arial, sans-serif",
         fontStyle: "bold",
       });
       initials.setOrigin(0.5, 0.5);
       marker.add(initials);
 
-      // State indicator
-      const stateText = this.add.text(0, -18, stateIcon(agent.state), {
+      const stateText = this.add.text(0, -16, stateIcon(agent.state), {
+        color: "#e2e8f0",
         fontSize: "10px",
+        fontFamily: "Inter, Arial, sans-serif",
       });
       stateText.setOrigin(0.5, 0.5);
       marker.add(stateText);
 
-      // Click handler
       circle.setInteractive({ useHandCursor: true });
       circle.on("pointerdown", () => {
         this.onAgentClick?.(agent.id);
@@ -292,10 +380,15 @@ export class TownScene extends Phaser.Scene {
       return;
     }
 
-    // Update selection highlight
-    const circle = marker.getAt(0) as Phaser.GameObjects.Arc;
-    if (circle && circle.setStrokeStyle) {
+    const circle = marker.getAt(0) as Phaser.GameObjects.Arc | undefined;
+    const stateText = marker.getAt(2) as Phaser.GameObjects.Text | undefined;
+
+    if (circle) {
       circle.setStrokeStyle(isSelected ? 4 : 2, isSelected ? 0xfbbf24 : 0x0f172a);
+    }
+
+    if (stateText) {
+      stateText.setText(stateIcon(agent.state));
     }
 
     this.tweens.killTweensOf(marker);
@@ -312,6 +405,13 @@ export class TownScene extends Phaser.Scene {
       duration: MARKER_TWEEN_MS,
       ease: "Sine.easeInOut",
     });
+  }
+
+  private clearRenderedChunks() {
+    for (const container of this.chunkContainers.values()) {
+      container.destroy(true);
+    }
+    this.chunkContainers.clear();
   }
 
   private clearAgentMarkers() {
