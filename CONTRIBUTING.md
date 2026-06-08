@@ -110,6 +110,11 @@ If your PR changes any file in `seed/`:
    node scripts/validate-seeds.mjs
    ```
 
+   Foreign-key checks are derived automatically from the migration schema in
+   `world-api/migrations/`, so adding seed data for a new FK-bearing table needs
+   no manual rule changes — just run the linter (and its tests) to confirm the
+   new references resolve.
+
 2. **Run the bootstrap smoke test** — proves the full migration + seed sequence
    works on a fresh database (requires Docker and a Bash-compatible shell
    such as Git Bash, WSL, macOS, or Linux):
