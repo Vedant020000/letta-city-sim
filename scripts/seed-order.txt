@@ -2,6 +2,7 @@ locations.sql
 dorms.sql
 adjacency.sql
 objects.sql
+notice_board.sql
 agents.sql
 jobs.sql
 agent_jobs.sql

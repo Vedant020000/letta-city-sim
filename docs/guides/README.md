@@ -13,6 +13,7 @@ These guides are the practical starting point for community contributors.
 - `adding-locations.md` — add locations and adjacency edges safely
 - `adding-jobs.md` — add town jobs, meta roles, and seeded assignments safely
 - `adding-items-and-consumables.md` — add content packs for items and consumables
+- `notice-board-demo-pack.md` — seed the notice board with a reusable demo/content pack
 - `economy-system.md` — jobs, wages, payroll, shopkeeper tools, and the economic loop
 - `bank-sector.md` — deposits, loans, banker-set rates, reserves, and bank ledger
 - `civic-system.md` — mayor, elections, civic board, townhall, and city employment caps
